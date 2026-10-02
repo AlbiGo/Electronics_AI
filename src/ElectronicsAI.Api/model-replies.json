@@ -1,0 +1,104 @@
+[
+  {
+    "requests": ["1-bit full adder", "1 bit adder", "one bit adder", "one-bit adder"],
+    "reply": {
+      "parts": [
+        {
+          "id": "fa0",
+          "type": "1-bit full adder",
+          "pins": ["A", "B", "Cin", "Sum", "Cout"]
+        }
+      ],
+      "wires": []
+    }
+  },
+  {
+    "requests": ["4-bit ripple-carry adder", "4-bit ripple carry adder", "4 bit adder"],
+    "reply": {
+      "parts": [
+        { "id": "fa0", "type": "1-bit full adder", "pins": ["A", "B", "Cin", "Sum", "Cout"] },
+        { "id": "fa1", "type": "1-bit full adder", "pins": ["A", "B", "Cin", "Sum", "Cout"] },
+        { "id": "fa2", "type": "1-bit full adder", "pins": ["A", "B", "Cin", "Sum", "Cout"] },
+        { "id": "fa3", "type": "1-bit full adder", "pins": ["A", "B", "Cin", "Sum", "Cout"] }
+      ],
+      "wires": [
+        { "from": "fa0.Cout", "to": "fa1.Cin" },
+        { "from": "fa1.Cout", "to": "fa2.Cin" },
+        { "from": "fa2.Cout", "to": "fa3.Cin" }
+      ]
+    }
+  },
+  {
+    "requests": ["5 V LED", "5V LED", "LED circuit", "series with an LED"],
+    "reply": {
+      "parts": [
+        { "id": "r1", "type": "resistor", "value": "330 ohm", "pins": ["1", "2"] },
+        { "id": "led1", "type": "LED", "pins": ["Anode", "Cathode"] }
+      ],
+      "wires": [
+        { "from": "VCC", "to": "r1.1" },
+        { "from": "r1.2", "to": "led1.Anode" },
+        { "from": "led1.Cathode", "to": "GND" }
+      ]
+    }
+  },
+  {
+    "requests": ["LED connected directly to 5V", "LED connected directly to 5 V"],
+    "reply": {
+      "parts": [
+        { "id": "led1", "type": "LED", "pins": ["Anode", "Cathode"] }
+      ],
+      "wires": [
+        { "from": "VCC", "to": "led1.Anode" },
+        { "from": "led1.Cathode", "to": "GND" }
+      ]
+    }
+  },
+  {
+    "requests": ["voltage divider", "10k divider", "5 V divider"],
+    "reply": {
+      "parts": [
+        { "id": "r1", "type": "resistor", "value": "10k", "pins": ["1", "2"] },
+        { "id": "r2", "type": "resistor", "value": "10k", "pins": ["1", "2"] }
+      ],
+      "wires": [
+        { "from": "VCC", "to": "r1.1" },
+        { "from": "r1.2", "to": "r2.1" },
+        { "from": "r2.2", "to": "GND" }
+      ]
+    }
+  },
+  {
+    "requests": ["divider with the bottom resistor missing", "voltage divider missing the bottom resistor"],
+    "reply": {
+      "parts": [
+        { "id": "r1", "type": "resistor", "value": "10k", "pins": ["1", "2"] }
+      ],
+      "wires": [
+        { "from": "VCC", "to": "r1.1" },
+        { "from": "r1.2", "to": "GND" }
+      ]
+    }
+  },
+  {
+    "requests": ["5 V tied to the MAX30102", "5V tied to the MAX30102"],
+    "reply": {
+      "parts": [
+        { "id": "esp32", "name": "ESP32", "type": "mcu", "pins": ["5V", "GND", "GPIO21", "GPIO22"] },
+        { "id": "max30102", "name": "MAX30102", "type": "sensor", "pins": ["3V3", "GND", "SDA", "SCL"] },
+        { "id": "rsda", "name": "R4.7k", "type": "resistor", "value": "4.7k", "pins": ["1", "2"] },
+        { "id": "rscl", "name": "R4.7k", "type": "resistor", "value": "4.7k", "pins": ["1", "2"] }
+      ],
+      "wires": [
+        { "from": "esp32.5V", "to": "max30102.3V3" },
+        { "from": "esp32.GND", "to": "max30102.GND" },
+        { "from": "esp32.GPIO21", "to": "max30102.SDA" },
+        { "from": "esp32.GPIO22", "to": "max30102.SCL" },
+        { "from": "esp32.5V", "to": "rsda.1" },
+        { "from": "rsda.2", "to": "max30102.SDA" },
+        { "from": "esp32.5V", "to": "rscl.1" },
+        { "from": "rscl.2", "to": "max30102.SCL" }
+      ]
+    }
+  }
+]

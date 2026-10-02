@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ElectronicsAI</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101614;
+      --panel: #17211e;
+      --line: #2c4038;
+      --text: #e7efe9;
+      --muted: #8aa396;
+      --net: #7ec8c3;
+      --silk: #e2b657;
+      --probe: #7dcea0;
+      --heat: #e08a4f;
+      --fail: #e07a7a;
+      --face: #24332e;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.45 "Segoe UI", sans-serif;
+    }
+
+    header, main { padding: 20px 24px; }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 { font-size: 18px; font-weight: 600; margin: 0; }
+
+    .presets, .stats, .parts { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .assumptions { margin: 0; padding-left: 18px; }
+    .assumptions li { margin: 4px 0; }
+
+    button {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button.active, button.primary {
+      background: var(--net);
+      color: #10211f;
+      border-color: var(--net);
+    }
+
+    main { display: grid; gap: 16px; max-width: 920px; }
+
+    .sheet {
+      background: var(--panel);
+      border: 1px solid var(--net);
+      border-radius: 8px;
+      padding: 16px;
+      min-height: 220px;
+    }
+
+    #schematic {
+      position: relative;
+      margin-top: 12px;
+      padding: 22px 16px 26px;
+      border-radius: 12px;
+      background-color: #1a6b43;
+      background-image:
+        radial-gradient(circle at 12px 12px, #0c3f27 3px, #e2b657 3.4px, #e2b657 5px, transparent 5.4px),
+        radial-gradient(circle at calc(100% - 12px) 12px, #0c3f27 3px, #e2b657 3.4px, #e2b657 5px, transparent 5.4px),
+        radial-gradient(circle at 12px calc(100% - 12px), #0c3f27 3px, #e2b657 3.4px, #e2b657 5px, transparent 5.4px),
+        radial-gradient(circle at calc(100% - 12px) calc(100% - 12px), #0c3f27 3px, #e2b657 3.4px, #e2b657 5px, transparent 5.4px),
+        linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+      background-size: auto, auto, auto, auto, 16px 16px, 16px 16px;
+      box-shadow: inset 0 0 0 3px rgba(12, 63, 39, 0.85), inset 0 0 28px rgba(0, 0, 0, 0.16);
+    }
+
+    #schematic svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .trace {
+      fill: none;
+      stroke: #f0c14a;
+      stroke-width: 2;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+      stroke-dasharray: 7 5;
+      animation: march 1.1s linear infinite;
+    }
+
+    @keyframes march {
+      to { stroke-dashoffset: -24; }
+    }
+
+    .stat {
+      min-width: 140px;
+    }
+
+    .stat b {
+      display: block;
+      font-family: Consolas, ui-monospace, monospace;
+      font-size: 20px;
+      color: var(--probe);
+    }
+
+    .stat span, .muted { color: var(--muted); font-size: 13px; }
+
+    .stat.warn b { color: var(--heat); }
+
+    table { width: 100%; border-collapse: collapse; }
+
+    th, td {
+      text-align: left;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    th { color: var(--muted); font-weight: 500; font-size: 13px; }
+
+    .Pass { color: var(--probe); }
+    .Warning { color: var(--heat); }
+    .Fail, .error { color: var(--fail); }
+    .Unavailable { color: var(--muted); }
+
+    .part {
+      border: 1px solid var(--silk);
+      color: var(--silk);
+      border-radius: 4px;
+      padding: 8px 10px;
+      min-width: 120px;
+    }
+
+    .part b { display: block; color: var(--text); }
+
+    pre {
+      overflow: auto;
+      color: var(--muted);
+      font: 12px/1.4 Consolas, ui-monospace, monospace;
+    }
+
+    pre.diagram {
+      color: var(--text);
+      margin: 0;
+      white-space: pre;
+      font-size: 13px;
+    }
+
+    #log {
+      max-height: 180px;
+      margin: 0;
+      white-space: pre-wrap;
+    }
+
+    .chat { display: grid; gap: 6px; }
+    .chat p { margin: 0; }
+    .chat .user { color: var(--text); }
+    .chat .assistant { color: var(--muted); }
+
+    h2 { font-size: 16px; margin: 0; }
+
+    form { display: flex; gap: 8px; }
+
+    input {
+      flex: 1;
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font: inherit;
+    }
+
+    button:disabled { opacity: 0.6; cursor: wait; }
+
+    .spinner {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      min-height: 160px;
+      color: var(--muted);
+    }
+
+    .spinner[hidden] { display: none; }
+
+    .spinner span {
+      width: 22px;
+      height: 22px;
+      border: 2px solid var(--line);
+      border-top-color: var(--net);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ElectronicsAI</h1>
+  </header>
+  <main>
+    <form id="describe-form">
+      <input id="description" type="text" placeholder="generate a 1-bit full adder" autocomplete="off" />
+      <button id="simulate" type="submit" class="primary">Simulate</button>
+    </form>
+    <pre id="log"></pre>
+    <div id="chat" class="chat"></div>
+    <section class="sheet">
+      <h2 id="title"></h2>
+      <p class="muted" id="summary"></p>
+      <div id="spinner" class="spinner" hidden><span></span>Simulating</div>
+      <div id="schematic"></div>
+    </section>
+    <div class="stats" id="stats"></div>
+    <ul id="assumptions" class="assumptions" hidden></ul>
+    <table id="results" hidden>
+      <thead>
+        <tr><th>Check</th><th>Evidence</th><th>Result</th></tr>
+      </thead>
+      <tbody id="checks"></tbody>
+    </table>
+    <details id="netlist-panel" hidden>
+      <summary>Netlist</summary>
+      <pre id="netlist"></pre>
+    </details>
+    <p class="error" id="error" hidden></p>
+  </main>
+  <script>
+    document.getElementById("describe-form").onsubmit = event => {
+      event.preventDefault();
+      sketch(document.getElementById("description").value);
+    };
+
+    function resetScreen() {
+      document.getElementById("log").textContent = "";
+      document.getElementById("chat").replaceChildren();
+      document.getElementById("title").textContent = "";
+      document.getElementById("summary").textContent = "";
+      document.getElementById("schematic").innerHTML = "";
+      document.getElementById("stats").innerHTML = "";
+      document.getElementById("assumptions").replaceChildren();
+      document.getElementById("assumptions").hidden = true;
+      document.getElementById("checks").innerHTML = "";
+      document.getElementById("results").hidden = true;
+      document.getElementById("netlist").textContent = "";
+      document.getElementById("netlist-panel").hidden = true;
+      document.getElementById("error").hidden = true;
+    }
+
+    function setBusy(busy) {
+      document.getElementById("spinner").hidden = !busy;
+      document.getElementById("simulate").disabled = busy;
+    }
+
+    async function sketch(description) {
+      const text = description.trim();
+      if (!text) return;
+      const error = document.getElementById("error");
+      resetScreen();
+      setBusy(true);
+      document.getElementById("title").textContent = "Simulating…";
+      remember("user", text);
+      log("Sending the request");
+      try {
+      const response = await fetch("/circuits/sketch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: text })
+      });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let drawn = false;
+      let failed = false;
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop();
+        for (const item of events) {
+          const data = item.replace(/^data:\s*/m, "").trim();
+          if (!data) continue;
+          let payload;
+          try {
+            payload = JSON.parse(data);
+          } catch (parseError) {
+            log(`Could not read an event: ${parseError.message}`);
+            continue;
+          }
+          if (payload.log) log(payload.log);
+          if (payload.error) {
+            failed = true;
+            setBusy(false);
+            error.hidden = false;
+            error.textContent = payload.error;
+            document.getElementById("title").textContent = "Simulation not finished";
+          }
+          if (payload.sketch) {
+            try {
+              drawn = true;
+              setBusy(false);
+              renderSketch(payload.sketch, payload.simulation);
+              document.getElementById("schematic").scrollIntoView({ block: "nearest" });
+              log("Simulation finished");
+            } catch (drawError) {
+              drawn = false;
+              failed = true;
+              error.hidden = false;
+              error.textContent = drawError.message;
+              log(`Simulation was not finished: ${drawError.message}`);
+            }
+          }
+        }
+      }
+      if (!drawn && !failed) {
+        error.hidden = false;
+        error.textContent = "The simulation could not be finished.";
+        document.getElementById("title").textContent = "Simulation not finished";
+      }
+      } catch (requestError) {
+        error.hidden = false;
+        error.textContent = requestError.message;
+        document.getElementById("title").textContent = "Simulation not finished";
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function log(line) {
+      const panel = document.getElementById("log");
+      const time = new Date().toLocaleTimeString();
+      panel.textContent += `${time}  ${line}\n`;
+      panel.scrollTop = panel.scrollHeight;
+    }
+
+    function renderSketch(sketch, simulation) {
+      document.getElementById("title").textContent = sketch.title;
+      document.getElementById("summary").textContent = shownSummary(sketch.summary, simulation && simulation.outputVolts);
+      document.getElementById("schematic").innerHTML = drawSketch(sketch, simulation && simulation.outputVolts);
+      const netlist = simulation && simulation.netlist ? simulation.netlist : "";
+      document.getElementById("netlist").textContent = netlist;
+      document.getElementById("netlist-panel").hidden = netlist.length === 0;
+      remember("assistant", sketch.summary);
+      document.getElementById("results").hidden = false;
+      const checks = simulation && simulation.checks && simulation.checks.length
+        ? simulation.checks
+        : [{ name: "Operating point", detail: "This schematic has no ngspice model yet.", result: "Unavailable" }];
+      document.getElementById("checks").innerHTML = checks.map(check =>
+        `<tr><td>${esc(check.name)}</td><td>${esc(check.detail)}</td><td class="${esc(check.result)}">${esc(check.result)}</td></tr>`
+      ).join("");
+      const assumptions = simulation && simulation.assumptions ? simulation.assumptions : [];
+      const assumptionList = document.getElementById("assumptions");
+      assumptionList.hidden = assumptions.length === 0;
+      assumptionList.innerHTML = assumptions.map(line => `<li>${esc(line)}</li>`).join("");
+      if (simulation && simulation.available && simulation.loadCurrentAmps != null) {
+        const milliamps = (simulation.loadCurrentAmps * 1000).toFixed(1);
+        const volts = simulation.outputVolts == null ? "—" : `${Number(simulation.outputVolts).toFixed(2)} V`;
+        document.getElementById("stats").innerHTML =
+          `<div class="stat"><b>${milliamps} mA</b><span>Load current</span></div>
+           <div class="stat"><b>${volts}</b><span>Output</span></div>`;
+      } else {
+        document.getElementById("stats").innerHTML = "";
+      }
+    }
+
+    function remember(role, text) {
+      const line = document.createElement("p");
+      line.className = role;
+      line.textContent = text;
+      document.getElementById("chat").appendChild(line);
+    }
+
+    function shownSummary(summary, volts) {
+      if (volts == null || volts === undefined || !summary) return summary || "";
+      const shown = Number(volts).toFixed(2);
+      return summary.replace(/(midpoint|output|vout)([\s\S]{0,40}?)~?\d+(?:\.\d+)?\s*V/i, (_, word, gap) => `${word}${gap}${shown} V`);
+    }
+
+    function partDetail(part, volts) {
+      const kind = `${part.type || ""} ${part.name || ""}`.toLowerCase();
+      if (volts != null && volts !== undefined && /vout|\bnode\b|junction/.test(kind)) {
+        return `${Number(volts).toFixed(2)} V`;
+      }
+      if (/gnd|ground/.test(kind)) return "ground";
+      return part.note || part.type || "";
+    }
+
+    function drawSketch(sketch, volts) {
+      const parts = sketch.parts || [];
+      if (parts.length === 0 && sketch.diagram) {
+        return `<pre class="diagram">${esc(sketch.diagram)}</pre>`;
+      }
+      return drawBlocks(sketch, volts);
+    }
+
+    function drawBlocks(sketch, volts) {
+      const shown = sketch.parts || [];
+      if (shown.length === 0) return "";
+      const boxW = 148;
+      const gap = 72;
+      const rowGap = 168;
+      const places = layout(sketch);
+      const boxes = shown.map(part => {
+        const pins = part.pins || [];
+        const leftCount = pins.length === 0 ? 0 : Math.ceil(pins.length / 2);
+        const rows = Math.max(leftCount, pins.length - leftCount, 1);
+        const place = places[part.id.toLowerCase()] || { column: 0, row: 0 };
+        return {
+          part,
+          pins,
+          leftCount,
+          x: 96 + place.column * (boxW + gap),
+          y: 42 + place.row * rowGap,
+          w: boxW,
+          h: Math.max(128, 28 + rows * 28),
+        };
+      });
+      const anchors = {};
+      boxes.forEach(box => {
+        const left = box.pins.slice(0, box.leftCount);
+        const right = box.pins.slice(box.leftCount);
+        left.forEach((pin, index) => {
+          anchors[`${box.part.id}.${pin}`.toLowerCase()] = { x: box.x, y: pinSlot(box, index, left.length), side: "left" };
+        });
+        right.forEach((pin, index) => {
+          anchors[`${box.part.id}.${pin}`.toLowerCase()] = { x: box.x + box.w, y: pinSlot(box, index, right.length), side: "right" };
+        });
+      });
+
+      const marks = [];
+      const wires = [];
+      (sketch.wires || []).forEach(link => {
+        const from = pinEnd(link.from, link.to, boxes, anchors);
+        const to = pinEnd(link.to, link.from, boxes, anchors);
+        if (!from || !to) return;
+        const start = placed(from, to);
+        const end = placed(to, from);
+        wires.push(trace(elbowPath(start, end)));
+        if (start.external) wires.push(netLabel(start));
+        if (end.external) wires.push(netLabel(end));
+      });
+
+      boxes.forEach((box, index) => {
+        const cx = box.x + box.w / 2;
+        const iconY = box.y + box.h / 2 - 16;
+        marks.push(`<g>`);
+        marks.push(deviceBody(box.x, box.y, box.w, box.h));
+        marks.push(deviceIcon(box.part, cx, iconY));
+        marks.push(caption(cx, box.y + box.h - 26, box.part.name, "text", "middle"));
+        marks.push(caption(cx, box.y + box.h - 10, partDetail(box.part, volts), "silk", "middle"));
+        box.pins.slice(0, box.leftCount).forEach((pin, pinIndex) => {
+          const y = pinSlot(box, pinIndex, box.leftCount);
+          marks.push(caption(box.x - 8, y + 4, pin, "silk", "end"));
+        });
+        box.pins.slice(box.leftCount).forEach((pin, pinIndex) => {
+          const y = pinSlot(box, pinIndex, box.pins.length - box.leftCount);
+          marks.push(caption(box.x + box.w + 8, y + 4, pin, "silk", "start"));
+        });
+        marks.push("</g>");
+      });
+
+      const right = Math.max(...boxes.map(box => box.x + box.w));
+      const bottom = Math.max(...boxes.map(box => box.y + box.h));
+      return `<svg viewBox="0 0 ${right + 86} ${bottom + 48}" role="img" aria-label="Schematic">${marks.join("")}${wires.join("")}</svg>`;
+    }
+
+    function layout(sketch) {
+      const parts = sketch.parts || [];
+      const wires = sketch.wires || [];
+      const byId = {};
+      parts.forEach(part => { byId[part.id.toLowerCase()] = part; });
+      const kindOf = part => `${part.type || ""} ${part.name || ""}`.toLowerCase();
+      const isGroundPart = part => /ground|gnd/.test(kindOf(part));
+      const isSupplyPart = part => /vsource|source|supply|battery/.test(kindOf(part));
+      const isCapacitor = part => /cap/.test(kindOf(part));
+      const isResistor = part => /resistor|ohm/.test(kindOf(part));
+      const partId = end => {
+        const text = String(end || "").trim();
+        const token = text.split(".")[0].toLowerCase();
+        return byId[token] ? byId[token].id.toLowerCase() : "";
+      };
+      const groundEnd = end => /^(gnd|vss|agnd|0)$/i.test(String(end || "").trim()) || isGroundPart(byId[partId(end)] || { type: "" });
+      const supplyEnd = end => /^(vcc|vdd|vin)$/i.test(String(end || "").trim()) || isSupplyPart(byId[partId(end)] || { type: "" });
+      const neighbors = {};
+      parts.forEach(part => { neighbors[part.id.toLowerCase()] = new Set(); });
+      wires.forEach(wire => {
+        const left = partId(wire.from);
+        const right = partId(wire.to);
+        if (left && right && left !== right) {
+          neighbors[left].add(right);
+          neighbors[right].add(left);
+        }
+      });
+      const touchesGround = id => wires.some(wire => {
+        const ends = [wire.from, wire.to];
+        return ends.some(end => partId(end) === id) && ends.some(groundEnd);
+      });
+      const shunt = new Set();
+      parts.forEach(part => {
+        const id = part.id.toLowerCase();
+        if (!touchesGround(id)) return;
+        const others = [...neighbors[id]].filter(next => !isGroundPart(byId[next]));
+        if (isCapacitor(part)) {
+          shunt.add(id);
+          return;
+        }
+        if (!isResistor(part) || others.length !== 1) return;
+        const upstream = others[0];
+        const continues = [...neighbors[upstream]].some(next => next !== id && !isGroundPart(byId[next]));
+        if (continues) shunt.add(id);
+      });
+      const column = {};
+      const queue = [];
+      parts.forEach(part => {
+        if (!isSupplyPart(part)) return;
+        column[part.id.toLowerCase()] = 0;
+        queue.push(part.id.toLowerCase());
+      });
+      wires.forEach(wire => {
+        const ends = [wire.from, wire.to];
+        ends.forEach((end, index) => {
+          if (!supplyEnd(end)) return;
+          const other = partId(ends[1 - index]);
+          if (other && column[other] == null && !shunt.has(other)) {
+            column[other] = 1;
+            queue.push(other);
+          }
+        });
+      });
+      while (queue.length) {
+        const id = queue.shift();
+        neighbors[id].forEach(next => {
+          if (shunt.has(next) || isGroundPart(byId[next]) || column[next] != null) return;
+          column[next] = column[id] + 1;
+          queue.push(next);
+        });
+      }
+      let spare = Math.max(-1, ...Object.values(column)) + 1;
+      parts.forEach(part => {
+        const id = part.id.toLowerCase();
+        if (column[id] == null && !shunt.has(id) && !isGroundPart(part)) column[id] = spare++;
+      });
+      shunt.forEach(id => {
+        const host = [...neighbors[id]].find(next => column[next] != null && !isGroundPart(byId[next]));
+        column[id] = host == null ? spare : column[host];
+      });
+      const row = {};
+      parts.forEach(part => {
+        const id = part.id.toLowerCase();
+        row[id] = shunt.has(id) ? 1 : 0;
+      });
+      parts.filter(isGroundPart).forEach(part => {
+        const id = part.id.toLowerCase();
+        const host = [...neighbors[id]].find(next => shunt.has(next)) || [...neighbors[id]].find(next => column[next] != null);
+        column[id] = host == null ? 0 : column[host];
+        row[id] = host != null && shunt.has(host) ? 2 : 1;
+      });
+      return Object.fromEntries(parts.map(part => [part.id.toLowerCase(), { column: column[part.id.toLowerCase()] || 0, row: row[part.id.toLowerCase()] || 0 }]));
+    }
+
+    function pinSlot(box, index, count) {
+      if (count <= 1) return box.y + box.h / 2;
+      const top = box.y + 24;
+      const bottom = box.y + box.h - 24;
+      return top + index * ((bottom - top) / (count - 1));
+    }
+
+    function deviceBody(x, y, w, h) {
+      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="var(--face)" stroke="var(--silk)" stroke-width="1.5" />`;
+    }
+
+    function deviceIcon(part, cx, cy) {
+      const type = `${part.type || ""} ${part.name || ""} ${part.note || ""}`.toLowerCase();
+      if (type.includes("resistor") || type.includes("ohm")) return iconResistor(cx, cy);
+      if (type.includes("cap")) return iconCapacitor(cx, cy);
+      if (type.includes("ground") || type.includes("gnd")) return ground(cx, cy);
+      if (type.includes("node") || type.includes("junction")) return `<circle cx="${cx}" cy="${cy}" r="5" fill="var(--net)" />`;
+      if (type.includes("mosfet") || type.includes("nmos")) return iconMosfet(cx, cy);
+      if (type.includes("pnp")) return iconTransistor(cx, cy, true);
+      if (type.includes("npn") || type.includes("transistor") || type.includes("bjt") || type.includes("2n") || /(^|\s)q\d/.test(type)) return iconTransistor(cx, cy, false);
+      if (type.includes("vsource") || type.includes("source") || type.includes("supply") || type.includes("battery")) {
+        return `<circle cx="${cx}" cy="${cy}" r="16" fill="none" stroke="var(--silk)" stroke-width="1.5" />
+          <text x="${cx}" y="${cy + 4}" text-anchor="middle" fill="var(--silk)" font-size="12">+</text>`;
+      }
+      if (type.includes("led")) return iconLed(cx, cy);
+      if (type.includes("adder")) return iconAdder(cx, cy);
+      if (type.includes("mcu") || type.includes("esp")) return iconChip(cx, cy);
+      if (type.includes("sensor")) return iconSensor(cx, cy);
+      if (type.includes("flip")) return iconFlop(cx, cy);
+      return iconChip(cx, cy);
+    }
+
+    function iconResistor(cx, cy) {
+      const x = cx - 26;
+      return `<polyline points="${x},${cy} ${x + 8},${cy} ${x + 14},${cy - 8} ${x + 22},${cy + 8} ${x + 30},${cy - 8} ${x + 38},${cy + 8} ${x + 44},${cy} ${x + 52},${cy}" fill="none" stroke="var(--silk)" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round" />`;
+    }
+
+    function iconTransistor(cx, cy, pnp) {
+      const bar = cx - 6;
+      const arrow = pnp
+        ? `<polygon points="${bar + 1},${cy + 6} ${cx + 7},${cy + 3} ${cx + 4},${cy + 11}" fill="var(--silk)" />`
+        : `<polygon points="${cx + 3},${cy + 9} ${cx + 13},${cy + 15} ${cx + 5},${cy + 17}" fill="var(--silk)" />`;
+      return `<line x1="${cx - 24}" y1="${cy}" x2="${bar}" y2="${cy}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${bar}" y1="${cy - 12}" x2="${bar}" y2="${cy + 12}" stroke="var(--silk)" stroke-width="2.25" />
+        <line x1="${bar}" y1="${cy - 6}" x2="${cx + 12}" y2="${cy - 16}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${cx + 12}" y1="${cy - 16}" x2="${cx + 12}" y2="${cy - 24}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${bar}" y1="${cy + 6}" x2="${cx + 12}" y2="${cy + 16}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${cx + 12}" y1="${cy + 16}" x2="${cx + 12}" y2="${cy + 24}" stroke="var(--silk)" stroke-width="1.5" />
+        ${arrow}`;
+    }
+
+    function iconMosfet(cx, cy) {
+      const gate = cx - 8;
+      const channel = cx - 2;
+      return `<line x1="${cx - 24}" y1="${cy}" x2="${gate}" y2="${cy}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${gate}" y1="${cy - 12}" x2="${gate}" y2="${cy + 12}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${channel}" y1="${cy - 12}" x2="${channel}" y2="${cy - 4}" stroke="var(--silk)" stroke-width="2.25" />
+        <line x1="${channel}" y1="${cy - 1}" x2="${channel}" y2="${cy + 1}" stroke="var(--silk)" stroke-width="2.25" />
+        <line x1="${channel}" y1="${cy + 4}" x2="${channel}" y2="${cy + 12}" stroke="var(--silk)" stroke-width="2.25" />
+        <line x1="${channel}" y1="${cy - 8}" x2="${cx + 12}" y2="${cy - 8}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${cx + 12}" y1="${cy - 8}" x2="${cx + 12}" y2="${cy - 22}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${channel}" y1="${cy + 8}" x2="${cx + 12}" y2="${cy + 8}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${cx + 12}" y1="${cy + 8}" x2="${cx + 12}" y2="${cy + 22}" stroke="var(--silk)" stroke-width="1.5" />
+        <polygon points="${cx + 6},${cy + 4} ${cx + 12},${cy + 8} ${cx + 6},${cy + 12}" fill="var(--silk)" />`;
+    }
+
+    function iconLed(cx, cy) {
+      return `<line x1="${cx - 28}" y1="${cy}" x2="${cx - 14}" y2="${cy}" stroke="var(--silk)" stroke-width="1.5" />
+        <polygon points="${cx - 14},${cy - 12} ${cx - 14},${cy + 12} ${cx + 8},${cy}" fill="none" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${cx + 8}" y1="${cy - 12}" x2="${cx + 8}" y2="${cy + 12}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${cx + 8}" y1="${cy}" x2="${cx + 24}" y2="${cy}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${cx + 4}" y1="${cy - 18}" x2="${cx + 12}" y2="${cy - 26}" stroke="var(--probe)" stroke-width="1.5">
+          <animate attributeName="opacity" values="0.25;1;0.25" dur="1.4s" repeatCount="indefinite" />
+        </line>
+        <line x1="${cx + 12}" y1="${cy - 16}" x2="${cx + 20}" y2="${cy - 24}" stroke="var(--probe)" stroke-width="1.5">
+          <animate attributeName="opacity" values="1;0.25;1" dur="1.4s" repeatCount="indefinite" />
+        </line>`;
+    }
+
+    function iconAdder(cx, cy) {
+      return `<circle cx="${cx}" cy="${cy}" r="16" fill="none" stroke="var(--silk)" stroke-width="1.5" />
+        <text x="${cx}" y="${cy + 5}" text-anchor="middle" fill="var(--silk)" font-size="16">Σ</text>`;
+    }
+
+    function iconCapacitor(cx, cy) {
+      return `<line x1="${cx - 22}" y1="${cy}" x2="${cx - 4}" y2="${cy}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${cx - 4}" y1="${cy - 14}" x2="${cx - 4}" y2="${cy + 14}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${cx + 4}" y1="${cy - 14}" x2="${cx + 4}" y2="${cy + 14}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${cx + 4}" y1="${cy}" x2="${cx + 22}" y2="${cy}" stroke="var(--silk)" stroke-width="1.5" />`;
+    }
+
+    function iconChip(cx, cy) {
+      const x = cx - 16;
+      const y = cy - 14;
+      let legs = "";
+      for (let index = 0; index < 3; index++) {
+        const pinY = y + 6 + index * 8;
+        legs += `<line x1="${x - 7}" y1="${pinY}" x2="${x}" y2="${pinY}" stroke="var(--silk)" stroke-width="1.5" />`;
+        legs += `<line x1="${x + 32}" y1="${pinY}" x2="${x + 39}" y2="${pinY}" stroke="var(--silk)" stroke-width="1.5" />`;
+      }
+      return `${legs}<rect x="${x}" y="${y}" width="32" height="28" rx="2" fill="none" stroke="var(--silk)" stroke-width="1.5" />
+        <circle cx="${x + 7}" cy="${y + 7}" r="2" fill="var(--probe)" />`;
+    }
+
+    function iconSensor(cx, cy) {
+      return `<polygon points="${cx},${cy - 16} ${cx + 14},${cy} ${cx},${cy + 16} ${cx - 14},${cy}" fill="none" stroke="var(--silk)" stroke-width="1.5" />
+        <circle cx="${cx}" cy="${cy}" r="3" fill="none" stroke="var(--probe)" stroke-width="1.5">
+          <animate attributeName="r" values="3;8;3" dur="1.6s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="1;0.15;1" dur="1.6s" repeatCount="indefinite" />
+        </circle>`;
+    }
+
+    function iconFlop(cx, cy) {
+      return `<polygon points="${cx - 18},${cy - 12} ${cx - 6},${cy} ${cx - 18},${cy + 12}" fill="none" stroke="var(--probe)" stroke-width="1.5" />
+        <text x="${cx + 2}" y="${cy + 4}" fill="var(--silk)" font-size="13">Q</text>`;
+    }
+
+    function pinEnd(token, other, boxes, anchors) {
+      const text = String(token || "").trim();
+      if (!text) return null;
+      const dotted = anchors[text.toLowerCase()];
+      if (dotted) return dotted;
+      const id = text.split(".")[0];
+      const box = boxes.find(item => item.part.id.toLowerCase() === id.toLowerCase());
+      if (!box) return text.includes(".") ? null : { external: true, label: text };
+      const otherBox = boxes.find(item => item.part.id.toLowerCase() === String(other || "").split(".")[0].toLowerCase());
+      if (!otherBox) return { x: box.x + box.w, y: box.y + box.h / 2, side: "right" };
+      const dx = (otherBox.x + otherBox.w / 2) - (box.x + box.w / 2);
+      const dy = (otherBox.y + otherBox.h / 2) - (box.y + box.h / 2);
+      if (Math.abs(dy) > Math.abs(dx)) {
+        const below = dy > 0;
+        return { x: box.x + box.w / 2, y: below ? box.y + box.h : box.y, side: below ? "bottom" : "top" };
+      }
+      const faceLeft = dx < 0;
+      return { x: faceLeft ? box.x : box.x + box.w, y: box.y + box.h / 2, side: faceLeft ? "left" : "right" };
+    }
+
+    function placed(end, other) {
+      if (!end.external) return end;
+      if (other.side === "bottom") return { x: other.x, y: other.y + 28, side: "bottom", external: true, label: end.label };
+      if (other.side === "top") return { x: other.x, y: other.y - 28, side: "top", external: true, label: end.label };
+      const outward = other.side === "left" ? -52 : 52;
+      return { x: other.x + outward, y: other.y, side: other.side, external: true, label: end.label };
+    }
+
+    function elbowPath(start, end) {
+      if (Math.abs(start.y - end.y) < 1) return `M${start.x},${start.y} L${end.x},${end.y}`;
+      if (Math.abs(start.x - end.x) < 1) return `M${start.x},${start.y} L${end.x},${end.y}`;
+      if (start.side === "top" || start.side === "bottom" || end.side === "top" || end.side === "bottom") {
+        const midY = Math.round((start.y + end.y) / 2);
+        return `M${start.x},${start.y} L${start.x},${midY} L${end.x},${midY} L${end.x},${end.y}`;
+      }
+      const mid = Math.round((start.x + end.x) / 2);
+      return `M${start.x},${start.y} L${mid},${start.y} L${mid},${end.y} L${end.x},${end.y}`;
+    }
+
+    function trace(path) {
+      return `<path class="trace" d="${path}" />${flow(path, "2.6s")}`;
+    }
+
+    function flow(path, duration) {
+      const half = Number.parseFloat(duration) / 2;
+      return `<g pointer-events="none">
+        <circle r="3.5" fill="var(--probe)"><animateMotion dur="${duration}" repeatCount="indefinite" path="${path}" /></circle>
+        <circle r="3.5" fill="var(--probe)"><animateMotion dur="${duration}" repeatCount="indefinite" begin="-${half}s" path="${path}" /></circle>
+      </g>`;
+    }
+
+    function netLabel(end) {
+      if (String(end.label).toLowerCase() === "gnd") {
+        const y = end.side === "top" ? end.y - 16 : end.y;
+        return ground(end.x, y) + caption(end.x, y - 8, "GND", "silk", "middle");
+      }
+      const anchor = end.side === "left" ? "end" : "start";
+      const x = end.side === "left" ? end.x - 4 : end.x + 4;
+      return caption(x, end.y - 6, end.label, "probe", anchor);
+    }
+
+    function ground(x, y) {
+      return `<line x1="${x - 14}" y1="${y}" x2="${x + 14}" y2="${y}" stroke="var(--net)" stroke-width="1.5" />
+        <line x1="${x - 9}" y1="${y + 6}" x2="${x + 9}" y2="${y + 6}" stroke="var(--net)" stroke-width="1.5" />
+        <line x1="${x - 4}" y1="${y + 12}" x2="${x + 4}" y2="${y + 12}" stroke="var(--net)" stroke-width="1.5" />`;
+    }
+
+    function caption(x, y, text, tone, anchor = "start", id = "") {
+      const fill = tone === "probe" ? "var(--probe)" : tone === "silk" ? "var(--silk)" : "var(--text)";
+      const idAttr = id ? ` id="${id}"` : "";
+      return `<text${idAttr} x="${x}" y="${y}" fill="${fill}" font-size="12" text-anchor="${anchor}">${esc(text)}</text>`;
+    }
+
+    function esc(value) {
+      return String(value).replace(/[&<>"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[character]));
+    }
+
+  </script>
+</body>
+</html>

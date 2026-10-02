@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>eaac7deb-f2c8-484f-a50b-c1b7b0d4b22d</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ElectronicsAI.Domain\ElectronicsAI.Domain.csproj" />
+    <ProjectReference Include="..\ElectronicsAI.Design\ElectronicsAI.Design.csproj" />
+    <ProjectReference Include="..\ElectronicsAI.Simulation\ElectronicsAI.Simulation.csproj" />
+    <ProjectReference Include="..\ElectronicsAI.Validation\ElectronicsAI.Validation.csproj" />
+  </ItemGroup>
+
+</Project>
