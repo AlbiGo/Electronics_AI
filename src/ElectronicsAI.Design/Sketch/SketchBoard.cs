@@ -27,6 +27,7 @@ public enum Mark
     HighVoltage,
     Sda,
     Scl,
+    Data,
 }
 
 public sealed record PartQuery(string[] Words, PartText Text = PartText.Type, string[]? Exclude = null, SketchPartKind? Kind = null)
@@ -106,6 +107,7 @@ public sealed class SketchBoard
         Mark.HighVoltage => IsHighVoltage(PinOf(end)),
         Mark.Sda => IsSda(PinOf(end)),
         Mark.Scl => IsScl(PinOf(end)),
+        Mark.Data => IsData(PinOf(end)),
         _ => false,
     };
 
@@ -228,6 +230,12 @@ public sealed class SketchBoard
     private static bool IsScl(string pin) =>
         pin.Equals("SCL", StringComparison.OrdinalIgnoreCase)
         || pin.Equals("GPIO22", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsData(string pin) =>
+        pin.Equals("DATA", StringComparison.OrdinalIgnoreCase)
+        || pin.Equals("DAT", StringComparison.OrdinalIgnoreCase)
+        || pin.Equals("DOUT", StringComparison.OrdinalIgnoreCase)
+        || pin.StartsWith("GPIO", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsNamed(string end, params string[] names)
     {

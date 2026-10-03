@@ -7,6 +7,7 @@ using ElectronicsAI.Simulation;
 using ElectronicsAI.Validation;
 
 var streamJson = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+streamJson.Converters.Add(new JsonStringEnumConverter());
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.ConfigureHttpJsonOptions(options =>

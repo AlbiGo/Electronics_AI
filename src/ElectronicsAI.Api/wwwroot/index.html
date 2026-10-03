@@ -61,7 +61,7 @@
       border-color: var(--net);
     }
 
-    main { display: grid; gap: 16px; max-width: 920px; }
+    main { display: grid; gap: 16px; max-width: 1120px; }
 
     .sheet {
       background: var(--panel);
@@ -401,7 +401,9 @@
         return `${Number(volts).toFixed(2)} V`;
       }
       if (/gnd|ground/.test(kind)) return "ground";
-      return part.note || part.type || "";
+      const detail = part.note || part.type || "";
+      const category = part.category && part.category !== "unknown" ? part.category : "";
+      return category && detail ? `${category} · ${detail}` : category || detail;
     }
 
     function drawSketch(sketch, volts) {
@@ -483,7 +485,7 @@
       return `<svg viewBox="0 0 ${right + 86} ${bottom + 48}" role="img" aria-label="Schematic">${marks.join("")}${wires.join("")}</svg>`;
     }
 
-    function layout(sketch) {
+    function layoutColumns(sketch) {
       const parts = sketch.parts || [];
       const wires = sketch.wires || [];
       const byId = {};
@@ -577,6 +579,241 @@
       return Object.fromEntries(parts.map(part => [part.id.toLowerCase(), { column: column[part.id.toLowerCase()] || 0, row: row[part.id.toLowerCase()] || 0 }]));
     }
 
+    function layout(sketch) {
+      const netPlaces = layoutNets(sketch);
+      return netPlaces || layoutColumns(sketch);
+    }
+
+    function layoutNets(sketch) {
+      const parts = sketch.parts || [];
+      const wires = sketch.wires || [];
+      if (parts.length === 0 || wires.length === 0) return null;
+      const byId = {};
+      parts.forEach(part => { byId[part.id.toLowerCase()] = part; });
+      const kind = part => `${part.type || ""} ${part.name || ""} ${part.note || ""}`.toLowerCase();
+      const isGroundPart = part => /\bground\b|\bgnd\b/.test(kind(part));
+      const isSupplyPart = part => /vsource|\bsource\b|\bsupply\b|\bbattery\b/.test(kind(part));
+      const isResistor = part => /resistor|\bohm\b|ω/.test(kind(part));
+      const isCapacitor = part => /\bcap/.test(kind(part));
+      const isController = part => /mcu|esp32|esp8266|arduino/.test(kind(part));
+      const crowded = part => /sensor|oled|adder|flip|driver|tb6612|l298|l293/.test(kind(part));
+      const key = end => String(end || "").trim().toLowerCase();
+      const parent = {};
+      const find = id => {
+        if (!parent[id]) parent[id] = id;
+        if (parent[id] !== id) parent[id] = find(parent[id]);
+        return parent[id];
+      };
+      const unite = (a, b) => {
+        const left = find(a);
+        const right = find(b);
+        if (left !== right) parent[right] = left;
+      };
+      wires.forEach(wire => unite(key(wire.from), key(wire.to)));
+      const members = {};
+      wires.forEach(wire => [wire.from, wire.to].forEach(end => {
+        const root = find(key(end));
+        if (!members[root]) members[root] = [];
+        members[root].push(key(end));
+      }));
+      const pinMatches = (pin, names) => {
+        const text = String(pin || "").toLowerCase();
+        return names.some(name => name.length <= 2 ? text === name : text.includes(name));
+      };
+      const ownerOf = end => {
+        const token = key(end).split(".")[0];
+        return byId[token] ? token : "";
+      };
+      const terminals = part => {
+        const id = part.id.toLowerCase();
+        const seen = new Map();
+        wires.forEach(wire => [wire.from, wire.to].forEach(end => {
+          if (ownerOf(end) !== id) return;
+          const text = key(end);
+          const pin = text.includes(".") ? text.slice(text.indexOf(".") + 1) : "";
+          const net = find(text);
+          if (!seen.has(net)) seen.set(net, pin);
+        }));
+        return [...seen.entries()].map(([net, pin]) => ({ net, pin }));
+      };
+      const isGroundEnd = end => /^(gnd|vss|agnd|0)$/.test(key(end)) || isGroundPart(byId[ownerOf(end)] || { type: "" });
+      const isSupplyEnd = end => /^(vcc|vdd|vin)$/.test(key(end)) || isSupplyPart(byId[ownerOf(end)] || { type: "" });
+      const isGroundNet = net => (members[find(net)] || []).some(isGroundEnd);
+      const isSupplyNet = net => !isGroundNet(net) && (members[find(net)] || []).some(isSupplyEnd);
+      const netHasPin = (net, names) => parts.some(part => terminals(part).some(term => term.net === find(net) && pinMatches(term.pin, names)));
+      const channel = (part, terms) => {
+        if (terms.length < 2) return null;
+        if (terms.length === 2) return [terms[0].net, terms[1].net];
+        const findTerm = names => terms.find(term => pinMatches(term.pin, names));
+        const pair = (left, right) => {
+          const a = findTerm(left);
+          const b = findTerm(right);
+          return a && b && a.net !== b.net ? [a.net, b.net] : null;
+        };
+        return pair(["d", "drain"], ["s", "source"])
+          || pair(["c", "collector"], ["e", "emitter"])
+          || pair(["vin"], ["out", "sw", "switch"])
+          || null;
+      };
+      const weight = part => {
+        const text = kind(part);
+        if (/motor|inductor|coil|led|relay|lamp|solenoid/.test(text)) return 6;
+        if (/mosfet|transistor|npn|pnp|bjt|regulator|lm2596/.test(text)) return 5;
+        if (/diode|schottky/.test(text)) return 4;
+        if (isResistor(part)) return 2;
+        return 1;
+      };
+      const edges = [];
+      parts.forEach(part => {
+        const terms = terminals(part);
+        if (isController(part) || crowded(part) || terms.length > 3 || isCapacitor(part)) return;
+        if (isResistor(part) && terms.some(term => netHasPin(term.net, ["g", "gate", "b", "base"]))) return;
+        const nets = channel(part, terms);
+        if (!nets || nets[0] === nets[1]) return;
+        edges.push({ partId: part.id.toLowerCase(), a: nets[0], b: nets[1], w: weight(part) });
+      });
+      const from = net => edges.filter(edge => edge.a === net || edge.b === net);
+      const other = (edge, net) => edge.a === net ? edge.b : edge.a;
+      const search = origin => {
+        const best = new Map();
+        const walk = (net, dist, seen) => {
+          if (seen.has(net) || seen.size > 8) return;
+          best.set(net, Math.max(best.get(net) ?? -1, dist));
+          seen.add(net);
+          from(net).forEach(edge => walk(other(edge, net), dist + 1, seen));
+          seen.delete(net);
+        };
+        walk(origin, 0, new Set());
+        return best;
+      };
+      const supplies = [...new Set(Object.keys(members).map(find))].filter(isSupplyNet);
+      let origin = null;
+      let rank = null;
+      let groundDist = -1;
+      supplies.forEach(supply => {
+        const reached = search(supply);
+        const ground = [...reached.keys()].filter(isGroundNet).reduce((far, net) => Math.max(far, reached.get(net) ?? 0), -1);
+        if (ground > groundDist) {
+          groundDist = ground;
+          origin = supply;
+          rank = reached;
+        }
+      });
+      if (!origin || !rank || groundDist < 1) return null;
+      const spineNets = [origin];
+      const spineParts = [];
+      let current = origin;
+      const claimed = new Set();
+      while (!isGroundNet(current)) {
+        const step = from(current)
+          .filter(edge => !claimed.has(edge.partId))
+          .map(edge => ({ edge, next: other(edge, current) }))
+          .filter(item => rank.get(item.next) === (rank.get(current) ?? 0) + 1)
+          .sort((left, right) => right.edge.w - left.edge.w)[0];
+        if (!step) break;
+        claimed.add(step.edge.partId);
+        spineParts.push(step.edge.partId);
+        current = step.next;
+        spineNets.push(current);
+      }
+      if (spineParts.length === 0) return null;
+      const places = {};
+      const taken = new Set();
+      const spineCol = 4;
+      const put = (part, column, row, direction) => {
+        const id = part.id.toLowerCase();
+        if (places[id]) return;
+        let col = column;
+        for (let guard = 0; guard < 12 && taken.has(`${col},${row}`); guard += 1) col += direction;
+        taken.add(`${col},${row}`);
+        places[id] = { column: col, row };
+      };
+      let row = 0;
+      parts.filter(part => isSupplyPart(part) && terminals(part).some(term => term.net === origin)).forEach((part, index) => put(part, spineCol + index, row, 1));
+      if (Object.keys(places).length) row += 1;
+      for (let index = 0; index < spineNets.length - 1; index += 1) {
+        const high = spineNets[index];
+        const low = spineNets[index + 1];
+        const between = edges
+          .filter(edge => (edge.a === high && edge.b === low) || (edge.a === low && edge.b === high))
+          .sort((left, right) => right.w - left.w);
+        between.forEach(edge => {
+          claimed.add(edge.partId);
+          put(byId[edge.partId], spineCol, row, 1);
+        });
+        row += 1;
+      }
+      if (isGroundNet(current)) {
+        parts.filter(part => isGroundPart(part) && terminals(part).some(term => term.net === current)).forEach(part => put(part, spineCol, row, 1));
+      }
+      if (!parts.some(part => places[part.id.toLowerCase()] && isGroundPart(part))) {
+        const bottom = Math.max(row, ...Object.values(places).map(place => place.row));
+        parts.filter(isGroundPart).forEach(part => put(part, spineCol, bottom + 1, 1));
+      }
+      const onSpine = net => spineNets.includes(net);
+      parts.forEach(part => {
+        const id = part.id.toLowerCase();
+        if (places[id] || isController(part)) return;
+        const terms = terminals(part);
+        if (terms.length !== 2) return;
+        const ground = terms.find(term => isGroundNet(term.net));
+        const live = terms.find(term => term !== ground && onSpine(term.net));
+        if (!ground || !live) return;
+        const hosts = parts.filter(host => places[host.id.toLowerCase()] && terminals(host).some(term => term.net === live.net));
+        const host = hosts.sort((left, right) => places[right.id.toLowerCase()].row - places[left.id.toLowerCase()].row)[0];
+        if (!host) return;
+        const spot = places[host.id.toLowerCase()];
+        put(part, spot.column + 1, spot.row, 1);
+      });
+      parts.forEach(part => {
+        const id = part.id.toLowerCase();
+        if (places[id] || isSupplyPart(part) || isGroundPart(part)) return;
+        const terms = terminals(part);
+        if (terms.length !== 1 || !onSpine(terms[0].net)) return;
+        const hosts = parts.filter(host => places[host.id.toLowerCase()] && terminals(host).some(term => term.net === terms[0].net));
+        const host = hosts.sort((left, right) => places[right.id.toLowerCase()].row - places[left.id.toLowerCase()].row)[0];
+        if (!host) return;
+        const spot = places[host.id.toLowerCase()];
+        put(part, spot.column + 1, spot.row, 1);
+      });
+      const queue = [];
+      const seen = new Set();
+      const enqueue = anchorId => {
+        const anchor = byId[anchorId];
+        if (!anchor) return;
+        terminals(anchor).forEach(term => {
+          if (isGroundNet(term.net)) return;
+          parts.forEach(part => {
+            const id = part.id.toLowerCase();
+            if (places[id] || seen.has(id)) return;
+            if (!terminals(part).some(item => item.net === term.net)) return;
+            queue.push({ id, anchor: anchorId });
+          });
+        });
+      };
+      Object.keys(places).forEach(enqueue);
+      while (queue.length) {
+        const item = queue.shift();
+        if (places[item.id] || seen.has(item.id)) continue;
+        seen.add(item.id);
+        const anchor = places[item.anchor];
+        if (!anchor) continue;
+        const part = byId[item.id];
+        const terms = terminals(part);
+        const shunt = !isController(part) && terms.length === 2 && isResistor(part) && terms.some(term => isGroundNet(term.net));
+        put(part, anchor.column - 1, anchor.row + (shunt ? 1 : 0), -1);
+        enqueue(item.id);
+      }
+      let spare = Math.max(...Object.values(places).map(place => place.column), spineCol) + 1;
+      parts.forEach(part => {
+        const id = part.id.toLowerCase();
+        if (!places[id]) put(part, spare++, 0, 1);
+      });
+      const shift = Math.min(...Object.values(places).map(place => place.column));
+      Object.values(places).forEach(place => { place.column -= shift; });
+      return places;
+    }
+
     function pinSlot(box, index, count) {
       if (count <= 1) return box.y + box.h / 2;
       const top = box.y + 24;
@@ -591,7 +828,9 @@
     function deviceIcon(part, cx, cy) {
       const type = `${part.type || ""} ${part.name || ""} ${part.note || ""}`.toLowerCase();
       if (type.includes("resistor") || type.includes("ohm")) return iconResistor(cx, cy);
+      if (type.includes("inductor") || type.includes("coil") || /\d\s*[uµμ]h/.test(type)) return iconInductor(cx, cy);
       if (type.includes("cap")) return iconCapacitor(cx, cy);
+      if (type.includes("schottky") || type.includes("diode")) return iconDiode(cx, cy);
       if (type.includes("ground") || type.includes("gnd")) return ground(cx, cy);
       if (type.includes("node") || type.includes("junction")) return `<circle cx="${cx}" cy="${cy}" r="5" fill="var(--net)" />`;
       if (type.includes("mosfet") || type.includes("nmos")) return iconMosfet(cx, cy);
@@ -661,6 +900,18 @@
         <text x="${cx}" y="${cy + 5}" text-anchor="middle" fill="var(--silk)" font-size="16">Σ</text>`;
     }
 
+    function iconInductor(cx, cy) {
+      const x = cx - 28;
+      return `<path d="M${x},${cy} h6 a6,6 0 1 1 12,0 a6,6 0 1 1 12,0 a6,6 0 1 1 12,0 a6,6 0 1 1 12,0 h6" fill="none" stroke="var(--silk)" stroke-width="1.75" />`;
+    }
+
+    function iconDiode(cx, cy) {
+      return `<line x1="${cx - 28}" y1="${cy}" x2="${cx - 12}" y2="${cy}" stroke="var(--silk)" stroke-width="1.5" />
+        <polygon points="${cx - 12},${cy - 12} ${cx - 12},${cy + 12} ${cx + 8},${cy}" fill="none" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${cx + 8}" y1="${cy - 12}" x2="${cx + 8}" y2="${cy + 12}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${cx + 8}" y1="${cy}" x2="${cx + 24}" y2="${cy}" stroke="var(--silk)" stroke-width="1.5" />`;
+    }
+
     function iconCapacitor(cx, cy) {
       return `<line x1="${cx - 22}" y1="${cy}" x2="${cx - 4}" y2="${cy}" stroke="var(--silk)" stroke-width="1.5" />
         <line x1="${cx - 4}" y1="${cy - 14}" x2="${cx - 4}" y2="${cy + 14}" stroke="var(--silk)" stroke-width="1.5" />
@@ -697,12 +948,23 @@
     function pinEnd(token, other, boxes, anchors) {
       const text = String(token || "").trim();
       if (!text) return null;
-      const dotted = anchors[text.toLowerCase()];
-      if (dotted) return dotted;
       const id = text.split(".")[0];
       const box = boxes.find(item => item.part.id.toLowerCase() === id.toLowerCase());
+      const otherText = String(other || "").trim();
+      const otherBox = boxes.find(item => item.part.id.toLowerCase() === otherText.split(".")[0].toLowerCase());
       if (!box) return text.includes(".") ? null : { external: true, label: text };
-      const otherBox = boxes.find(item => item.part.id.toLowerCase() === String(other || "").split(".")[0].toLowerCase());
+      if (!otherBox && /^(gnd|vss|agnd|0)$/i.test(otherText)) return { x: box.x + box.w / 2, y: box.y + box.h, side: "bottom" };
+      if (!otherBox && /^(vcc|vdd|vin)$/i.test(otherText)) return { x: box.x + box.w / 2, y: box.y, side: "top" };
+      if (otherBox) {
+        const dx = (otherBox.x + otherBox.w / 2) - (box.x + box.w / 2);
+        const dy = (otherBox.y + otherBox.h / 2) - (box.y + box.h / 2);
+        if (Math.abs(dy) > Math.abs(dx)) {
+          const below = dy > 0;
+          return { x: box.x + box.w / 2, y: below ? box.y + box.h : box.y, side: below ? "bottom" : "top" };
+        }
+      }
+      const dotted = anchors[text.toLowerCase()];
+      if (dotted) return dotted;
       if (!otherBox) return { x: box.x + box.w, y: box.y + box.h / 2, side: "right" };
       const dx = (otherBox.x + otherBox.w / 2) - (box.x + box.w / 2);
       const dy = (otherBox.y + otherBox.h / 2) - (box.y + box.h / 2);

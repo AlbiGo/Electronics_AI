@@ -15,6 +15,7 @@ public sealed class SchematicSketchService(HttpClient http, LanguageModelOptions
         ESP32 and MAX30102: {"kind":"heart-rate","title":"Heart rate monitor","summary":"The ESP32 reads the MAX30102 over I2C. SDA is GPIO21 and SCL is GPIO22."}
         Any other circuit: {"title":"...","summary":"...","parts":[{"id":"r1","name":"R1","type":"block","note":"10k"}],"wires":[{"from":"r1","to":"r2"}]}
         If the user asks for a transistor, include that transistor in parts. A transistor and an LED need the transistor, the LED, a series resistor, and a base resistor.
+        A buck converter needs the switching regulator, an inductor, a Schottky diode, an input capacitor, and an output capacitor. Set category to power, passive, logic, sensor, actuator, or protection.
         Do not add a parts list to a ripple counter or a heart-rate reply.
         """;
 

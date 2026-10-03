@@ -9,10 +9,10 @@ public static class SketchReplyParser
     {
         void Note(string message) => log?.Invoke(message);
 
-        if (HeartRateMonitorSketch.TryCreate(request) is { } requested)
+        if (SketchTemplates.MatchRequest(request) is { } requested)
         {
-            Note("Building an ESP32 and MAX30102 heart rate monitor");
-            return requested;
+            Note(requested.Note);
+            return requested.Sketch;
         }
 
         var start = content.IndexOf('{');
@@ -70,19 +70,10 @@ public static class SketchReplyParser
             Note("Model reply had no JSON object");
         }
 
-        var heart = HeartRateMonitorSketch.TryCreate(content) ?? HeartRateMonitorSketch.TryCreate(request);
-        if (heart is not null)
+        if ((SketchTemplates.MatchText(content) ?? SketchTemplates.MatchRequest(request)) is { } generated)
         {
-            Note("Building an ESP32 and MAX30102 heart rate monitor");
-            return heart;
-        }
-
-        var generated = RippleCounterSketch.TryCreate(content);
-        if (generated is not null)
-        {
-            var bits = generated.Parts.Count(part => part.Type == "flipflop");
-            Note($"Reply text describes a {bits}-bit ripple counter");
-            return generated;
+            Note(generated.Note);
+            return generated.Sketch;
         }
 
         Note("Using the model text as the diagram");
@@ -102,16 +93,10 @@ public static class SketchReplyParser
         var kind = Text(root, "kind")?.Trim().ToLowerInvariant();
         var bits = Int(root, "bits");
         note($"JSON fields: kind={kind ?? "none"}, bits={bits?.ToString() ?? "none"}, title={title}");
-        if (kind is "heart-rate" or "heartrate" or "heart-rate-monitor")
+        if (SketchTemplates.MatchKind(kind, bits, title, summary, partial: false) is { } built)
         {
-            note("Building an ESP32 and MAX30102 heart rate monitor");
-            return HeartRateMonitorSketch.Create(Text(root, "title"), Text(root, "summary"));
-        }
-
-        if (bits is >= 1 and <= 16 && kind is "ripple-counter" or "ripplecounter" or "counter")
-        {
-            note($"Building a {bits.Value}-bit ripple counter");
-            return RippleCounterSketch.Create(bits.Value, title, summary);
+            note(built.Note);
+            return built.Sketch;
         }
 
         var parts = new List<SketchPart>();
@@ -126,7 +111,10 @@ public static class SketchReplyParser
                     continue;
                 }
 
-                parts.Add(new SketchPart(id, name, Normalize(Text(part, "type")), Text(part, "note") ?? Text(part, "value"), PinNames(part)));
+                var type = Normalize(Text(part, "type"));
+                var value = Text(part, "note") ?? Text(part, "value");
+                var category = PartCategories.Read(Text(part, "category")) ?? PartCategories.Infer(type, name, value);
+                parts.Add(new SketchPart(id, name, type, value, PinNames(part), category));
                 if (parts.Count == 24)
                 {
                     break;
@@ -136,10 +124,10 @@ public static class SketchReplyParser
 
         var listedWires = Array(root, "wires") ?? Array(root, "connections");
         if ((listedWires is null || listedWires.Value.GetArrayLength() == 0)
-            && HeartRateMonitorSketch.TryCreate(string.Join(" ", parts.Select(part => part.Name))) is not null)
+            && SketchTemplates.MatchNames(string.Join(" ", parts.Select(part => part.Name)), title, summary) is { } named)
         {
-            note("Building an ESP32 and MAX30102 heart rate monitor");
-            return HeartRateMonitorSketch.Create(title, summary);
+            note(named.Note);
+            return named.Sketch;
         }
 
         var wires = new List<SketchWire>();
@@ -162,6 +150,12 @@ public static class SketchReplyParser
                     break;
                 }
             }
+        }
+
+        if (BuckConverterRules.TryComplete(parts, request, title, summary) is { } buck)
+        {
+            note(buck.Note);
+            return buck.Sketch;
         }
 
         if (SketchTemplates.TryComplete(parts, request, title, summary) is { } completed)
@@ -392,16 +386,10 @@ public static class SketchReplyParser
         var summary = Field(content, "summary");
         int? bits = int.TryParse(Field(content, "bits"), out var parsed) ? parsed : null;
         note($"Partial JSON fields: kind={kind ?? "none"}, bits={bits?.ToString() ?? "none"}, title={title ?? "none"}");
-        if (kind is "heart-rate" or "heartrate" or "heart-rate-monitor")
+        if (SketchTemplates.MatchKind(kind, bits, title, summary, partial: true) is { } built)
         {
-            note("Building an ESP32 and MAX30102 heart rate monitor");
-            return HeartRateMonitorSketch.Create(title, summary);
-        }
-
-        if (bits is >= 1 and <= 16 && kind is "ripple-counter" or "ripplecounter" or "counter")
-        {
-            note($"Building a {bits.Value}-bit ripple counter from the partial reply");
-            return RippleCounterSketch.Create(bits.Value, title, summary);
+            note(built.Note);
+            return built.Sketch;
         }
 
         return null;
@@ -425,6 +413,10 @@ public static class SketchReplyParser
         return value switch
         {
             "tff" or "dff" or "flip-flop" or "flipflop" => "flipflop",
+            "inductor" or "coil" => "inductor",
+            "schottky" => "schottky",
+            "diode" => "diode",
+            "regulator" or "buck" => "regulator",
             "in" or "input" or "clock" => "input",
             "out" or "output" or "q" => "output",
             "and" or "or" or "not" or "nand" or "gate" => "gate",

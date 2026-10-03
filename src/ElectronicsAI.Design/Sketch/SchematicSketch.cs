@@ -1,6 +1,23 @@
 namespace ElectronicsAI.Design;
 
-public sealed record SketchPart(string Id, string Name, string Type, string? Note, IReadOnlyList<string>? Pins = null)
+public enum PartCategory
+{
+    Unknown,
+    Power,
+    Passive,
+    Logic,
+    Sensor,
+    Actuator,
+    Protection,
+}
+
+public sealed record SketchPart(
+    string Id,
+    string Name,
+    string Type,
+    string? Note,
+    IReadOnlyList<string>? Pins = null,
+    PartCategory Category = PartCategory.Unknown)
 {
     public IReadOnlyList<string> Pins { get; init; } = Pins ?? [];
 }

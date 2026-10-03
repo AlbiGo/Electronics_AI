@@ -86,7 +86,7 @@ public class CircuitCompilerTests
     [Fact]
     public void Heart_rate_board_passes_wiring_rules_without_spice()
     {
-        var sketch = HeartRateMonitorSketch.Create();
+        var sketch = SketchTemplates.MatchRequest("ESP32 and MAX30102")!.Sketch;
         var rules = ModuleSketchRules.Evaluate(sketch);
 
         Assert.True(ModuleSketchRules.Applies(sketch));
@@ -372,6 +372,55 @@ public class CircuitCompilerTests
         Assert.Equal(CircuitCategory.MotorDriver, motorMatch!.Category);
         Assert.Equal(CircuitCategory.Filter, filterMatch!.Category);
         Assert.Contains(catalog.Sets, set => set.Category == CircuitCategory.Relay);
-        Assert.Contains(catalog.Sets, set => set.Category == CircuitCategory.Sensor);
+        Assert.Contains(catalog.Sets, set => set.Category == CircuitCategory.Esp32Sensor);
+    }
+
+    [Fact]
+    public void A_buck_reply_missing_the_inductor_is_completed_and_checked()
+    {
+        const string reply = """
+            {"title":"Buck","summary":"Steps 12 V down to 5 V.","parts":[{"id":"u1","name":"LM2596","type":"regulator"},{"id":"cin","name":"Input capacitor","type":"capacitor","value":"100uF"},{"id":"cout","name":"Output capacitor","type":"capacitor","value":"220uF"},{"id":"sw","name":"Switch node","type":"node"},{"id":"gnd","name":"GND","type":"ground"},{"id":"vin","name":"VIN","type":"supply","note":"12V"},{"id":"vout","name":"Vout","type":"node","note":"5V"}],"wires":[{"from":"vin","to":"u1.VIN"},{"from":"u1.OUT","to":"sw"},{"from":"sw","to":"vout"}]}
+            """;
+
+        var sketch = SketchReplyParser.Parse(reply, "Create a buck converter from 12V to 5V");
+        var inductor = Assert.Single(sketch.Parts, part => part.Type == "inductor");
+        Assert.Equal(PartCategory.Passive, inductor.Category);
+        Assert.Equal("33uH", inductor.Note);
+        Assert.Contains(sketch.Parts, part => part.Type == "schottky");
+
+        var match = new SketchRuleCatalog(SketchRules.All).Match(sketch, "Create a buck converter from 12V to 5V");
+        var rules = match!.Evaluate(sketch, "Create a buck converter from 12V to 5V").Rules;
+        Assert.Equal(CircuitCategory.Buck, match.Category);
+        Assert.All(rules, rule => Assert.Equal("Pass", rule.Result));
+        Assert.Contains(rules, rule => rule.Name == "Inductor");
+        Assert.Contains(rules, rule => rule.Name == "Schottky diode");
+        Assert.Contains(rules, rule => rule.Detail == "12 V in is above 5 V out.");
+    }
+
+    [Fact]
+    public void A_buck_with_the_output_above_the_input_fails()
+    {
+        const string reply = """
+            {"title":"Buck","summary":"","parts":[{"id":"vin","name":"VIN","type":"supply","note":"5V","category":"power"},{"id":"u1","name":"LM2596","type":"regulator","category":"power"},{"id":"L1","type":"inductor","category":"passive","value":"33uH"},{"id":"d1","name":"Schottky","type":"schottky","note":"1N5822","category":"protection"},{"id":"cin","name":"Input capacitor","type":"capacitor","value":"100uF","category":"passive"},{"id":"cout","name":"Output capacitor","type":"capacitor","value":"220uF","category":"passive"},{"id":"vout","name":"Vout","type":"node","note":"12V","category":"power"}]}
+            """;
+
+        var sketch = SketchReplyParser.Parse(reply, "Create a buck converter from 5V to 12V");
+        var inductor = sketch.Parts.Single(part => part.Id == "L1");
+        Assert.Equal(PartCategory.Passive, inductor.Category);
+        Assert.Equal("33uH", inductor.Note);
+
+        var rule = BuckConverterRules.Evaluate(sketch).Single(item => item.Name == "Input above output");
+        Assert.Equal("Fail", rule.Result);
+        Assert.Equal("5 V in is not above 12 V out.", rule.Detail);
+    }
+
+    [Fact]
+    public void An_rc_filter_is_not_a_buck_converter()
+    {
+        const string filter = """
+            {"title":"Low-pass","parts":[{"id":"r1","name":"R1","type":"resistor","note":"1.6k"},{"id":"c1","name":"C1","type":"capacitor","note":"100nF"},{"id":"gnd","name":"GND","type":"ground"}],"wires":[{"from":"r1","to":"c1"},{"from":"c1","to":"gnd"}]}
+            """;
+        var sketch = SketchReplyParser.Parse(filter, "RC low-pass filter at 1 kHz");
+        Assert.Equal(CircuitCategory.Filter, new SketchRuleCatalog(SketchRules.All).Match(sketch, "RC low-pass filter at 1 kHz")!.Category);
     }
 }

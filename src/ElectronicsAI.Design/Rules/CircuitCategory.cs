@@ -3,7 +3,7 @@ namespace ElectronicsAI.Design;
 public enum CircuitCategory
 {
     Unknown,
-    Sensor,
+    Esp32Sensor,
     Led,
     Relay,
     MotorDriver,
@@ -11,6 +11,7 @@ public enum CircuitCategory
     Filter,
     Divider,
     Logic,
+    Buck,
 }
 
 public interface ISketchValidator
@@ -71,11 +72,11 @@ public static class SketchValidators
 
     private sealed class SensorValidator : ISensorValidator
     {
-        public CircuitCategory Category => CircuitCategory.Sensor;
+        public CircuitCategory Category => CircuitCategory.Esp32Sensor;
 
-        public string Reason => "Module wiring checked without ngspice.";
+        public string Reason => "ESP32 sensor checked without ngspice.";
 
-        public bool Applies(SchematicSketch sketch) => CircuitCategories.Of(sketch) == CircuitCategory.Sensor;
+        public bool Applies(SchematicSketch sketch) => CircuitCategories.Of(sketch) == CircuitCategory.Esp32Sensor;
 
         public IReadOnlyList<SketchRule> Evaluate(SchematicSketch sketch) => ModuleSketchRules.Evaluate(sketch);
     }
@@ -100,9 +101,14 @@ public static class CircuitCategories
             return CircuitCategory.TransistorLed;
         }
 
-        if (sketch.Parts.Any(part => Is(part, "sensor", "max30102", "dht", "oled")))
+        if (BuckConverterRules.Applies(sketch, null))
         {
-            return CircuitCategory.Sensor;
+            return CircuitCategory.Buck;
+        }
+
+        if (Esp32SensorFamily.Matches(sketch))
+        {
+            return CircuitCategory.Esp32Sensor;
         }
 
         if (RcLowPassRules.Applies(sketch))
@@ -110,28 +116,21 @@ public static class CircuitCategories
             return CircuitCategory.Filter;
         }
 
-        if (sketch.Parts.Any(part => SketchPartKinds.Of(part) == SketchPartKind.Led))
+        if (LedFamily.Matches(sketch))
         {
             return CircuitCategory.Led;
         }
 
-        var resistors = sketch.Parts.Count(part => SketchPartKinds.Of(part) == SketchPartKind.Resistor);
-        if (resistors >= 2 && sketch.Parts.All(part => SketchPartKinds.IsAnalog(SketchPartKinds.Of(part))))
+        if (DividerFamily.Matches(sketch))
         {
             return CircuitCategory.Divider;
         }
 
-        if (sketch.Parts.Any(part => Is(part, "adder", "gate", "flip")))
+        if (LogicFamily.Matches(sketch))
         {
             return CircuitCategory.Logic;
         }
 
         return CircuitCategory.Unknown;
-    }
-
-    private static bool Is(SketchPart part, params string[] words)
-    {
-        var text = $"{part.Type} {part.Name}";
-        return words.Any(word => text.Contains(word, StringComparison.OrdinalIgnoreCase));
     }
 }

@@ -7,7 +7,7 @@ public static partial class RcLowPassRules
 {
     public static bool Applies(SchematicSketch sketch)
     {
-        if (MotorDriverRules.Applies(sketch) || RelayDriverRules.Applies(sketch))
+        if (MotorDriverRules.Applies(sketch) || RelayDriverRules.Applies(sketch) || BuckConverterRules.Applies(sketch, null))
         {
             return false;
         }
