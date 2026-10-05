@@ -92,8 +92,8 @@ public sealed class SketchBoard
         Mark.Ground => IsNamed(end, "GND", "VSS", "0"),
         Mark.WireSupply => IsToken(end, "VCC", "VDD", "5V", "+5V"),
         Mark.WireGround => IsToken(end, "GND", "0", "VSS"),
-        Mark.MotorDiscreteSupply => IsToken(end, "VCC", "VMOT", "+5V", "5V", "12V") || TypeHas(Owner(end), "supply", "vsource"),
-        Mark.MotorFlybackSupply => IsToken(end, "VCC", "VMOT", "+5V", "5V", "12V") || TypeHas(Owner(end), "supply", "vsource", "battery"),
+        Mark.MotorDiscreteSupply => IsToken(end, "VCC", "VMOT", "+5V", "5V", "12V", "+12V") || TypeHas(Owner(end), "supply", "vsource"),
+        Mark.MotorFlybackSupply => IsToken(end, "VCC", "VMOT", "+5V", "5V", "12V", "+12V") || TypeHas(Owner(end), "supply", "vsource", "battery"),
         Mark.RelaySupply => IsToken(end, "VCC", "VDD", "+5V", "5V") || TypeHas(Owner(end), "supply", "vsource", "source"),
         Mark.TransistorSupply => IsTransistorSupply(end),
         Mark.LogicHigh => IsToken(end, "VCC", "VMOT", "+5V", "5V", "12V", "3V3") || IsNamed(end, "3V3") || TypeHas(Owner(end), "supply", "vsource", "battery"),
@@ -125,7 +125,11 @@ public sealed class SketchBoard
     {
         var text = $"{part.Type} {part.Name}";
         return text.Contains("mcu", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("esp32", StringComparison.OrdinalIgnoreCase);
+            || text.Contains("esp32", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("arduino", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("stm32", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("rp2040", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("ecu", StringComparison.OrdinalIgnoreCase);
     }
 
     public static bool IsModule(SketchPart part)
@@ -202,7 +206,7 @@ public sealed class SketchBoard
         }
 
         var part = Owner(end);
-        return part is not null && TypeHas(part, "mcu", "esp32");
+        return part is not null && TypeHas(part, "mcu", "esp32", "ecu");
     }
 
     private static bool IsModulePower(string pin) =>

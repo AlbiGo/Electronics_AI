@@ -9,6 +9,7 @@ public enum SketchPartKind
     Supply,
     Ground,
     Node,
+    Switch,
 }
 
 public static class SketchPartKinds
@@ -46,7 +47,30 @@ public static class SketchPartKinds
             return SketchPartKind.Supply;
         }
 
+        if (IsSwitch(type))
+        {
+            return SketchPartKind.Switch;
+        }
+
         return SketchPartKind.Unknown;
+    }
+
+    private static bool IsSwitch(string type)
+    {
+        if (Has(type, "regulator") || Has(type, "buck") || Has(type, "lm2596") || Has(type, "lm2576"))
+        {
+            return false;
+        }
+
+        if (Has(type, "button") || Has(type, "momentary") || Has(type, "spst") || Has(type, "spdt"))
+        {
+            return true;
+        }
+
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            type,
+            @"(^|[^a-z])switch([^a-z]|$)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
     }
 
     public static bool IsAnalog(SketchPartKind kind) =>

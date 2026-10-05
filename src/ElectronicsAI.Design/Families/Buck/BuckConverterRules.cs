@@ -32,65 +32,6 @@ public static partial class BuckConverterRules
         return Has(text, "inductor", "coil") || Microhenry().IsMatch(text);
     }
 
-    public static bool TopologyComplete(IEnumerable<SketchPart> parts) =>
-        parts.Any(IsRegulator) && parts.Any(IsInductor) && parts.Any(IsSchottky)
-        && parts.Any(IsInputCapacitor) && parts.Any(IsOutputCapacitor);
-
-    public static SketchCompletion? TryComplete(
-        IReadOnlyList<SketchPart> parts,
-        string? request,
-        string? title,
-        string? summary)
-    {
-        var probe = new SchematicSketch(title ?? "", summary ?? "", parts, [], null);
-        if (!Applies(probe, request) || TopologyComplete(parts))
-        {
-            return null;
-        }
-
-        var (input, output) = AskedVoltages(request);
-        var shownIn = input.ToString("0.##", CultureInfo.InvariantCulture);
-        var shownOut = output.ToString("0.##", CultureInfo.InvariantCulture);
-        var board = new SchematicSketch(
-            string.IsNullOrWhiteSpace(title) ? $"{shownIn} V to {shownOut} V buck converter" : title,
-            string.IsNullOrWhiteSpace(summary)
-                ? $"LM2596 steps {shownIn} V down to {shownOut} V through a 33 µH inductor and a 1N5822 Schottky diode."
-                : summary,
-            [
-                new SketchPart("vin", "VIN", "supply", $"{shownIn}V", ["OUT"], PartCategory.Power),
-                new SketchPart("u1", "LM2596", "regulator", null, ["VIN", "OUT", "GND"], PartCategory.Power),
-                new SketchPart("l1", "L1", "inductor", "33uH", ["1", "2"], PartCategory.Passive),
-                new SketchPart("d1", "Schottky", "schottky", "1N5822", ["A", "K"], PartCategory.Protection),
-                new SketchPart("cin", "Input capacitor", "capacitor", "100uF", ["1", "2"], PartCategory.Passive),
-                new SketchPart("cout", "Output capacitor", "capacitor", "220uF", ["1", "2"], PartCategory.Passive),
-                new SketchPart("vout", "Vout", "node", $"{shownOut}V", null, PartCategory.Power),
-                new SketchPart("gnd", "GND", "ground", null),
-            ],
-            [
-                new SketchWire("vin.OUT", "u1.VIN"),
-                new SketchWire("vin.OUT", "cin.1"),
-                new SketchWire("cin.2", "gnd"),
-                new SketchWire("u1.GND", "gnd"),
-                new SketchWire("u1.OUT", "l1.1"),
-                new SketchWire("u1.OUT", "d1.K"),
-                new SketchWire("d1.A", "gnd"),
-                new SketchWire("l1.2", "vout"),
-                new SketchWire("l1.2", "cout.1"),
-                new SketchWire("cout.2", "gnd"),
-            ],
-            null);
-        return new SketchCompletion(board, "The model left out the inductor. Building an LM2596 buck converter with the inductor and Schottky diode.");
-    }
-
-    public static (double Input, double Output) AskedVoltages(string? request)
-    {
-        var found = Volts().Matches(request ?? "")
-            .Select(match => double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture))
-            .Take(2)
-            .ToArray();
-        return found.Length == 2 ? (found[0], found[1]) : (12, 5);
-    }
-
     private static SketchRule Present(SchematicSketch sketch, Func<SketchPart, bool> match, string name, string pass, string fail)
     {
         var part = sketch.Parts.FirstOrDefault(match);

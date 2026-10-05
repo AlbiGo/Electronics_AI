@@ -6,11 +6,11 @@ public static class MotorFamily
 {
     private static readonly PartQuery BridgePart = new(["tb6612", "h-bridge", "hbridge", "drv8833", "l298", "l293", "bts7960"], PartText.TypeName);
 
-    private static readonly PartQuery MotorPart = new(["motor"], PartText.TypeName);
+    private static readonly PartQuery MotorPart = new(["motor", "solenoid", "pump"], PartText.TypeName);
 
     private static readonly PartQuery DiodePart = new(["diode"]);
 
-    private static readonly PartQuery Controller = new(["mcu", "esp32"], PartText.TypeName);
+    private static readonly PartQuery Controller = new(["mcu", "esp32", "ecu"], PartText.TypeName);
 
     private static readonly PartQuery MosfetApply = new(["mosfet", "nmos"], PartText.TypeName);
 

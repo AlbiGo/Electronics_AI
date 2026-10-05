@@ -115,6 +115,7 @@ app.MapPost("/circuits/sketch", async (
     {
         var sketch = await sketches.SketchAsync(request.Description, cancellationToken, Say);
         var simulation = spice.Simulate(sketch, request.Description);
+        var suggestion = CircuitSuggestions.Find(simulation.Checks.Select(check => (check.Name, check.Detail, check.Result)));
         if (simulation.Netlist is not null)
         {
             await Say("Compiled a SPICE netlist.");
@@ -128,7 +129,7 @@ app.MapPost("/circuits/sketch", async (
         }
 
         await context.Response.WriteAsync(
-            $"data: {JsonSerializer.Serialize(new { sketch, simulation }, streamJson)}\n\n",
+            $"data: {JsonSerializer.Serialize(new { sketch, simulation, suggestion }, streamJson)}\n\n",
             cancellationToken);
         await context.Response.Body.FlushAsync(cancellationToken);
     }

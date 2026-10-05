@@ -11,6 +11,7 @@ public sealed partial class CircuitCompiler
 
     public Circuit Compile(SchematicSketch sketch)
     {
+        sketch = CloseSwitches(sketch);
         if (sketch.Parts.Count == 0)
         {
             throw new CircuitCompileException("This schematic has no ngspice model yet.");
@@ -170,6 +171,45 @@ public sealed partial class CircuitCompiler
             components,
             nets);
     }
+
+    private static SchematicSketch CloseSwitches(SchematicSketch sketch)
+    {
+        var switches = sketch.Parts.Where(part => SketchPartKinds.Of(part) == SketchPartKind.Switch).ToList();
+        if (switches.Count == 0)
+        {
+            return sketch;
+        }
+
+        var wires = sketch.Wires.ToList();
+        foreach (var part in switches)
+        {
+            var attached = wires.Where(wire => EndsOn(wire.From, part.Id) || EndsOn(wire.To, part.Id)).ToList();
+            if (attached.Count != 2)
+            {
+                throw new CircuitCompileException($"Switch {part.Name} needs two wires to test the closed circuit.");
+            }
+
+            wires.Remove(attached[0]);
+            wires.Remove(attached[1]);
+            wires.Add(new SketchWire(Other(attached[0], part.Id), Other(attached[1], part.Id)));
+        }
+
+        return sketch with
+        {
+            Parts = sketch.Parts.Where(part => SketchPartKinds.Of(part) != SketchPartKind.Switch).ToList(),
+            Wires = wires,
+        };
+    }
+
+    private static bool EndsOn(string end, string partId)
+    {
+        var text = end.Trim();
+        var id = text.Split('.')[0];
+        return id.Equals(partId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string Other(SketchWire wire, string partId) =>
+        EndsOn(wire.From, partId) ? wire.To : wire.From;
 
     private static Resistor Probe(IReadOnlyList<Resistor> resistors, IReadOnlyList<Led> leds, IReadOnlyList<Net> nets)
     {

@@ -9,12 +9,6 @@ public static class SketchReplyParser
     {
         void Note(string message) => log?.Invoke(message);
 
-        if (SketchTemplates.MatchRequest(request) is { } requested)
-        {
-            Note(requested.Note);
-            return requested.Sketch;
-        }
-
         var start = content.IndexOf('{');
         var end = content.LastIndexOf('}');
         if (start >= 0 && end > start)
@@ -70,7 +64,7 @@ public static class SketchReplyParser
             Note("Model reply had no JSON object");
         }
 
-        if ((SketchTemplates.MatchText(content) ?? SketchTemplates.MatchRequest(request)) is { } generated)
+        if (SketchTemplates.MatchText(content) is { } generated)
         {
             Note(generated.Note);
             return generated.Sketch;
@@ -123,13 +117,6 @@ public static class SketchReplyParser
         }
 
         var listedWires = Array(root, "wires") ?? Array(root, "connections");
-        if ((listedWires is null || listedWires.Value.GetArrayLength() == 0)
-            && SketchTemplates.MatchNames(string.Join(" ", parts.Select(part => part.Name)), title, summary) is { } named)
-        {
-            note(named.Note);
-            return named.Sketch;
-        }
-
         var wires = new List<SketchWire>();
         var skipped = 0;
         if (listedWires is { } wireArray)
@@ -150,18 +137,6 @@ public static class SketchReplyParser
                     break;
                 }
             }
-        }
-
-        if (BuckConverterRules.TryComplete(parts, request, title, summary) is { } buck)
-        {
-            note(buck.Note);
-            return buck.Sketch;
-        }
-
-        if (SketchTemplates.TryComplete(parts, request, title, summary) is { } completed)
-        {
-            note(completed.Note);
-            return completed.Sketch;
         }
 
         note(skipped == 0
@@ -415,7 +390,8 @@ public static class SketchReplyParser
             "tff" or "dff" or "flip-flop" or "flipflop" => "flipflop",
             "inductor" or "coil" => "inductor",
             "schottky" => "schottky",
-            "diode" => "diode",
+            "diode" or "flyback_diode" or "flyback-diode" or "flyback" => "diode",
+            "nmosfet" or "n-mosfet" or "n_mosfet" or "pmosfet" => "mosfet",
             "regulator" or "buck" => "regulator",
             "in" or "input" or "clock" => "input",
             "out" or "output" or "q" => "output",

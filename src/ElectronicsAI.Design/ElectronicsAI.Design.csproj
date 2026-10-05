@@ -4,6 +4,10 @@
     <ProjectReference Include="..\ElectronicsAI.Domain\ElectronicsAI.Domain.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Components\components.json" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>

@@ -12,6 +12,7 @@ public enum CircuitCategory
     Divider,
     Logic,
     Buck,
+    Solenoid,
 }
 
 public interface ISketchValidator
@@ -89,6 +90,11 @@ public static class CircuitCategories
         if (RelayDriverRules.Applies(sketch))
         {
             return CircuitCategory.Relay;
+        }
+
+        if (SolenoidFamily.Pattern.Applies(sketch, null))
+        {
+            return CircuitCategory.Solenoid;
         }
 
         if (MotorDriverRules.Applies(sketch))

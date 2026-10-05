@@ -38,34 +38,6 @@ public static class TransistorLedFamily
 
     private static readonly End FetDrain = new(SwitchPart, ["d"], ["drain"]);
 
-    public static SketchTemplate Board { get; } = new()
-    {
-        RequestGroups = [["transistor", "npn", "pnp", "mosfet", "bjt"], ["led", "light"]],
-        SkipWhenPartContains = ["transistor", "npn", "pnp", "bjt", "mosfet", "nmos", "2n2222", "2n3904"],
-        Title = "NPN transistor LED switch",
-        Summary = "An NPN low-side switch. The LED has a 330 ohm series resistor from 5 V, and a 10k resistor drives the base.",
-        Note = "The model left out the transistor. Building an NPN LED switch.",
-        Parts =
-        [
-            new("vcc", "VCC", "supply", "5V"),
-            new("gnd", "GND", "ground", null),
-            new("in", "IN", "node", "control signal"),
-            new("rbase", "R_BASE", "resistor", "10k", ["1", "2"]),
-            new("rled", "R_LED", "resistor", "330 ohm", ["1", "2"]),
-            new("q1", "Q1", "npn", "2N2222", ["B", "C", "E"]),
-            new("led1", "LED1", "led", null, ["A", "K"]),
-        ],
-        Wires =
-        [
-            new("vcc", "rled.1"),
-            new("rled.2", "led1.A"),
-            new("led1.K", "q1.C"),
-            new("q1.E", "gnd"),
-            new("in", "rbase.1"),
-            new("rbase.2", "q1.B"),
-        ],
-    };
-
     public static ISketchRuleSet MissingTransistor { get; } = new RequiredPartRuleSet(
         CircuitCategory.TransistorLed,
         [SwitchTerm.Transistor, SwitchTerm.Npn, SwitchTerm.Pnp, SwitchTerm.Mosfet, SwitchTerm.Bjt],

@@ -5,7 +5,7 @@ using ElectronicsAI.Validation;
 
 namespace ElectronicsAI.Api;
 
-public sealed record DescribeRequest(string Description);
+public sealed record DescribeRequest(string Description, string? Accept = null);
 
 public sealed record AnalyzeRequest(
     double InputVolts,

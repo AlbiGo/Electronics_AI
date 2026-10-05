@@ -37,7 +37,7 @@ public static class PartCategories
             return PartCategory.Actuator;
         }
 
-        if (Has(text, "mcu", "esp32", "gate", "flip", "adder"))
+        if (Has(text, "mcu", "esp32", "ecu", "gate", "flip", "adder"))
         {
             return PartCategory.Logic;
         }

@@ -48,6 +48,12 @@ public sealed class SketchSpice(ICircuitCompiler compiler, SpiceNetlistWriter wr
                 checks.Add(new SketchCheckView(stated.Name, stated.Detail, stated.Result));
             }
 
+            var assumptions = SketchCircuitChecks.Assumptions(circuit).ToList();
+            if (sketch.Parts.Any(part => SketchPartKinds.Of(part) == SketchPartKind.Switch))
+            {
+                assumptions.Add("The push button is closed.");
+            }
+
             return new SketchSimulationView(
                 result.Available,
                 result.Reason,
@@ -56,7 +62,7 @@ public sealed class SketchSpice(ICircuitCompiler compiler, SpiceNetlistWriter wr
                 point?.OutputVolts,
                 point?.LoadCurrentAmps,
                 checks,
-                SketchCircuitChecks.Assumptions(circuit));
+                assumptions);
         }
         catch (CircuitCompileException exception)
         {

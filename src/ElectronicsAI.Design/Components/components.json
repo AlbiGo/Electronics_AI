@@ -1,0 +1,177 @@
+[
+  {
+    "name": "LM35",
+    "category": "sensor",
+    "interface": "Analog",
+    "voltage": "5V",
+    "pins": ["VCC", "GND", "OUT"]
+  },
+  {
+    "name": "TMP36",
+    "category": "sensor",
+    "interface": "Analog",
+    "voltage": "5V",
+    "pins": ["VCC", "GND", "OUT"]
+  },
+  {
+    "name": "MAX30102",
+    "category": "sensor",
+    "interface": "I2C",
+    "voltage": "3.3V",
+    "pins": ["VIN", "GND", "SDA", "SCL"]
+  },
+  {
+    "name": "DHT22",
+    "category": "sensor",
+    "interface": "Data",
+    "voltage": "3.3V",
+    "pins": ["VCC", "GND", "DATA"]
+  },
+  {
+    "name": "MPU6050",
+    "category": "sensor",
+    "interface": "I2C",
+    "voltage": "3.3V",
+    "pins": ["VCC", "GND", "SDA", "SCL"]
+  },
+  {
+    "name": "Voltage Divider",
+    "category": "power",
+    "interface": "Divider",
+    "voltage": "5V",
+    "pins": ["IN", "OUT", "GND"]
+  },
+  {
+    "name": "LM7805",
+    "category": "power",
+    "interface": "Linear",
+    "voltage": "5V",
+    "pins": ["IN", "GND", "OUT"]
+  },
+  {
+    "name": "LM2596",
+    "category": "power",
+    "interface": "Buck",
+    "voltage": "5V",
+    "pins": ["VIN", "GND", "SW", "FB", "OUT"]
+  },
+  {
+    "name": "MT3608",
+    "category": "power",
+    "interface": "Boost",
+    "voltage": "5V",
+    "pins": ["VIN", "GND", "SW"]
+  },
+  {
+    "name": "ESP32",
+    "category": "embedded",
+    "interface": "GPIO",
+    "voltage": "3.3V",
+    "pins": ["3V3", "5V", "GND", "GPIO21", "GPIO22", "GPIO34"]
+  },
+  {
+    "name": "Arduino",
+    "category": "embedded",
+    "interface": "GPIO",
+    "voltage": "5V",
+    "pins": ["5V", "GND", "A0", "SDA", "SCL"]
+  },
+  {
+    "name": "STM32",
+    "category": "embedded",
+    "interface": "GPIO",
+    "voltage": "3.3V",
+    "pins": ["3V3", "GND"]
+  },
+  {
+    "name": "RP2040",
+    "category": "embedded",
+    "interface": "GPIO",
+    "voltage": "3.3V",
+    "pins": ["3V3", "GND"]
+  },
+  {
+    "name": "Relay",
+    "category": "switching",
+    "interface": "Digital",
+    "voltage": "5V",
+    "pins": ["VCC", "GND", "IN"]
+  },
+  {
+    "name": "MOSFET",
+    "category": "switching",
+    "interface": "Digital",
+    "voltage": "12V",
+    "pins": ["Gate", "Drain", "Source"]
+  },
+  {
+    "name": "Solenoid",
+    "category": "switching",
+    "interface": "Digital",
+    "voltage": "12V",
+    "pins": ["VCC", "Control", "GND"]
+  },
+  {
+    "name": "DC Motor",
+    "category": "motor",
+    "interface": "PWM",
+    "voltage": "12V",
+    "pins": ["VCC", "GND"]
+  },
+  {
+    "name": "PWM Controller",
+    "category": "motor",
+    "interface": "PWM",
+    "voltage": "5V",
+    "pins": ["PWM", "GND", "VCC"]
+  },
+  {
+    "name": "TB6612",
+    "category": "motor",
+    "interface": "H-Bridge",
+    "voltage": "12V",
+    "pins": ["VM", "VCC", "GND", "AO1", "AO2", "PWMA"]
+  },
+  {
+    "name": "AND Gate",
+    "category": "logic",
+    "interface": "Digital",
+    "voltage": "5V",
+    "pins": ["A", "B", "Y"]
+  },
+  {
+    "name": "Half Adder",
+    "category": "logic",
+    "interface": "Digital",
+    "voltage": "5V",
+    "pins": ["A", "B", "Sum", "Cout"]
+  },
+  {
+    "name": "Full Adder",
+    "category": "logic",
+    "interface": "Digital",
+    "voltage": "5V",
+    "pins": ["A", "B", "Cin", "Sum", "Cout"]
+  },
+  {
+    "name": "Counter",
+    "category": "logic",
+    "interface": "Digital",
+    "voltage": "5V",
+    "pins": ["CLK", "Q"]
+  },
+  {
+    "name": "Flip-Flop",
+    "category": "logic",
+    "interface": "Digital",
+    "voltage": "5V",
+    "pins": ["T", "CLK", "Q"]
+  },
+  {
+    "name": "Register",
+    "category": "logic",
+    "interface": "Digital",
+    "voltage": "5V",
+    "pins": ["D", "CLK", "Q"]
+  }
+]

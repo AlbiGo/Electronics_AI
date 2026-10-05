@@ -4,60 +4,6 @@ namespace ElectronicsAI.Design;
 
 public sealed record SketchCompletion(SchematicSketch Sketch, string Note);
 
-public sealed class SketchTemplate
-{
-    public string[][] RequestGroups { get; init; } = [];
-
-    public string[] Kinds { get; init; } = [];
-
-    public string[] SkipWhenPartContains { get; init; } = [];
-
-    public bool ReplaceRequest { get; init; }
-
-    public bool FillWhenUnwired { get; init; }
-
-    public required string Title { get; init; }
-
-    public required string Summary { get; init; }
-
-    public required string Note { get; init; }
-
-    public required IReadOnlyList<SketchPart> Parts { get; init; }
-
-    public required IReadOnlyList<SketchWire> Wires { get; init; }
-
-    public bool Requested(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text) || RequestGroups.Length == 0)
-        {
-            return false;
-        }
-
-        return RequestGroups.All(group => group.Any(word => text.Contains(word, StringComparison.OrdinalIgnoreCase)));
-    }
-
-    public bool KindIs(string? kind) =>
-        !string.IsNullOrWhiteSpace(kind)
-        && Kinds.Any(item => item.Equals(kind, StringComparison.OrdinalIgnoreCase));
-
-    public bool AlreadyPresent(SketchPart part)
-    {
-        var text = $"{part.Type} {part.Name} {part.Note}";
-        return SkipWhenPartContains.Any(word => text.Contains(word, StringComparison.OrdinalIgnoreCase));
-    }
-
-    public SketchCompletion Create(string? title, string? summary) =>
-        new(Board(title, summary), Note);
-
-    private SchematicSketch Board(string? title, string? summary) =>
-        new(
-            string.IsNullOrWhiteSpace(title) ? Title : title,
-            string.IsNullOrWhiteSpace(summary) ? Summary : summary,
-            Parts,
-            Wires,
-            null);
-}
-
 public sealed class ChainTemplate
 {
     public required string[] Kinds { get; init; }
@@ -138,22 +84,10 @@ public sealed class ChainTemplate
 
 public static partial class SketchTemplates
 {
-    private static readonly SketchTemplate[] Boards = [TransistorLedFamily.Board, Esp32SensorFamily.HeartBoard];
-
     private static readonly ChainTemplate[] Chains = [LogicFamily.Ripple];
-
-    public static SketchCompletion? MatchRequest(string? request) =>
-        Boards.FirstOrDefault(board => board.ReplaceRequest && board.Requested(request)) is { } board
-            ? board.Create(null, null)
-            : null;
 
     public static SketchCompletion? MatchKind(string? kind, int? count, string? title, string? summary, bool partial)
     {
-        if (Boards.FirstOrDefault(board => board.KindIs(kind)) is { } board)
-        {
-            return board.Create(title, summary);
-        }
-
         if (count is null || Chains.FirstOrDefault(item => item.KindIs(kind)) is not { } chain)
         {
             return null;
@@ -162,18 +96,8 @@ public static partial class SketchTemplates
         return chain.Create(count.Value, title, summary, partial ? chain.PartialNote : chain.KindNote);
     }
 
-    public static SketchCompletion? MatchNames(string? names, string? title, string? summary) =>
-        Boards.FirstOrDefault(board => board.FillWhenUnwired && board.Requested(names)) is { } board
-            ? board.Create(title, summary)
-            : null;
-
     public static SketchCompletion? MatchText(string? text)
     {
-        if (Boards.FirstOrDefault(board => board.ReplaceRequest && board.Requested(text)) is { } board)
-        {
-            return board.Create(null, null);
-        }
-
         var count = CountIn(text);
         if (count is null || Chains.FirstOrDefault(item => item.TextMentions(text)) is not { } chain)
         {
@@ -181,16 +105,6 @@ public static partial class SketchTemplates
         }
 
         return chain.Create(count.Value, null, null, chain.TextNote);
-    }
-
-    public static SketchCompletion? TryComplete(
-        IReadOnlyList<SketchPart> parts,
-        string? request,
-        string? title,
-        string? summary)
-    {
-        var template = Boards.FirstOrDefault(item => item.Requested(request) && !item.ReplaceRequest && !parts.Any(item.AlreadyPresent));
-        return template?.Create(title, summary);
     }
 
     private static int? CountIn(string? text)

@@ -9,6 +9,7 @@ public static class CircuitPatterns
         LedFamily.BareLed,
         DividerFamily.OpenDivider,
         RelayFamily.Pattern,
+        SolenoidFamily.Pattern,
         MotorFamily.Bridge,
         MotorFamily.Discrete,
         TransistorLedFamily.Pattern,

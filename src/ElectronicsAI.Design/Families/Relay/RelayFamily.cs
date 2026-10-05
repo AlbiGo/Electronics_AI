@@ -8,7 +8,7 @@ public static class RelayFamily
 
     private static readonly PartQuery DiodePart = new(["diode"]);
 
-    private static readonly PartQuery Controller = new(["mcu", "esp32"], PartText.TypeName);
+    private static readonly PartQuery Controller = new(["mcu", "esp32", "ecu"], PartText.TypeName);
 
     private static readonly PartQuery TypeResistor = new(["resistor"]);
 
