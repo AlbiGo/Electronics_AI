@@ -16,7 +16,7 @@ public static class SketchPartKinds
 {
     public static SketchPartKind Of(SketchPart part)
     {
-        var type = $"{part.Type} {part.Name}";
+        var type = $"{part.Type} {part.Name} {part.Note}";
         if (Has(type, "resistor") || Has(type, "ohm"))
         {
             return SketchPartKind.Resistor;
@@ -37,7 +37,7 @@ public static class SketchPartKinds
             return SketchPartKind.Ground;
         }
 
-        if (Has(type, "node") || Has(type, "junction") || Has(type, "net"))
+        if (Word(type, "node") || Word(type, "junction") || Word(type, "net"))
         {
             return SketchPartKind.Node;
         }
@@ -62,7 +62,7 @@ public static class SketchPartKinds
             return false;
         }
 
-        if (Has(type, "button") || Has(type, "momentary") || Has(type, "spst") || Has(type, "spdt"))
+        if (Has(type, "button") || Has(type, "momentary") || Has(type, "spst") || Has(type, "spdt") || Has(type, "normally-open") || Has(type, "normally open"))
         {
             return true;
         }
@@ -83,4 +83,10 @@ public static class SketchPartKinds
 
     private static bool Has(string text, string word) =>
         text.Contains(word, StringComparison.OrdinalIgnoreCase);
+
+    private static bool Word(string text, string word) =>
+        System.Text.RegularExpressions.Regex.IsMatch(
+            text,
+            $@"(^|[^a-z]){System.Text.RegularExpressions.Regex.Escape(word)}([^a-z]|$)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 }

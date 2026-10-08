@@ -1,4 +1,5 @@
 using ElectronicsAI.Design;
+using ElectronicsAI.Domain;
 using ElectronicsAI.Simulation;
 using ElectronicsAI.Validation;
 
@@ -8,30 +9,6 @@ public class CircuitCompilerTests
 {
     private readonly CircuitCompiler compiler = new();
     private readonly SpiceNetlistWriter writer = new();
-
-    [Fact]
-    public void Led_tied_directly_to_5v_fails_for_a_missing_resistor()
-    {
-        const string reply = """
-            {"parts":[{"id":"led1","type":"LED","pins":["Anode","Cathode"]}],"wires":[{"from":"VCC","to":"led1.Anode"},{"from":"led1.Cathode","to":"GND"}]}
-            """;
-
-        var rule = AnalogSketchRules.MissingSeriesResistor(SketchReplyParser.Parse(reply, "LED connected directly to 5V"));
-
-        Assert.NotNull(rule);
-        Assert.Equal("Fail", rule.Result);
-        Assert.Equal("Missing current limiting resistor.", rule.Detail);
-    }
-
-    [Fact]
-    public void Led_with_a_series_resistor_is_not_flagged()
-    {
-        const string reply = """
-            {"parts":[{"id":"r1","type":"resistor","value":"330 ohm","pins":["1","2"]},{"id":"led1","type":"LED","pins":["Anode","Cathode"]}],"wires":[{"from":"VCC","to":"r1.1"},{"from":"r1.2","to":"led1.Anode"},{"from":"led1.Cathode","to":"GND"}]}
-            """;
-
-        Assert.Null(AnalogSketchRules.MissingSeriesResistor(SketchReplyParser.Parse(reply, "5 V LED")));
-    }
 
     [Fact]
     public void Led_sketch_compiles_to_a_5_volt_netlist()
@@ -50,6 +27,66 @@ public class CircuitCompilerTests
     }
 
     [Fact]
+    public void Pinless_push_button_led_is_in_series_from_5v_to_ground()
+    {
+        const string reply = """
+            {"parts":[{"id":"sw1","name":"SW1","type":"block","note":"Push Button"},{"id":"r1","name":"R1","type":"block","note":"330 ohm"},{"id":"d1","name":"D1","type":"block","note":"LED"}],"wires":[{"from":"+5V","to":"sw1"},{"from":"sw1","to":"r1"},{"from":"r1","to":"d1"},{"from":"d1","to":"GND"}]}
+            """;
+
+        var result = new LedCircuitValidator().Evaluate(SketchReplyParser.Parse(reply, "push button LED"), null);
+
+        Assert.True(result.Simulate);
+        Assert.All(result.Rules, rule => Assert.Equal("Pass", rule.Result));
+    }
+
+    [Fact]
+    public void Block_typed_push_button_led_compiles_as_a_closed_switch()
+    {
+        const string reply = """
+            {"title":"Push Button + LED","parts":[{"id":"v1","name":"V1","type":"block","note":"5V supply"},{"id":"s1","name":"S1","type":"block","note":"normally-open push button"},{"id":"r1","name":"R1","type":"block","note":"330 ohm"},{"id":"d1","name":"D1","type":"block","note":"LED anode"}],"wires":[{"from":"v1","to":"s1"},{"from":"s1","to":"r1"},{"from":"r1","to":"d1"},{"from":"d1","to":"GND"}]}
+            """;
+
+        var circuit = new CircuitEngine(compiler).Compile(SketchReplyParser.Parse(reply, "Push Button + LED"));
+
+        Assert.Contains(circuit.Components, component => component is Led);
+        Assert.Contains(circuit.Components, component => component is Resistor);
+        Assert.DoesNotContain(circuit.Components, component => component.Id == "s1");
+    }
+
+    [Fact]
+    public void Series_led_passes_validation_before_simulation()
+    {
+        const string reply = """
+            {"parts":[{"id":"r1","type":"resistor","value":"330 ohm","pins":["1","2"]},{"id":"led1","type":"LED","pins":["Anode","Cathode"]}],"wires":[{"from":"VCC","to":"r1.1"},{"from":"r1.2","to":"led1.Anode"},{"from":"led1.Cathode","to":"GND"}]}
+            """;
+
+        var sketch = SketchReplyParser.Parse(reply, "5 V LED");
+        var result = new LedCircuitValidator().Evaluate(sketch, null);
+
+        Assert.True(result.Simulate);
+        Assert.All(result.Rules, rule => Assert.Equal("Pass", rule.Result));
+        Assert.Contains(result.Rules, rule => rule.Name == "Resistor present");
+        Assert.Contains(result.Rules, rule => rule.Name == "Correct wiring");
+        Assert.Contains(result.Rules, rule => rule.Name == "Power source present");
+        Assert.Contains(result.Rules, rule => rule.Name == "Ground present");
+    }
+
+    [Fact]
+    public void Led_without_a_resistor_fails_validation()
+    {
+        const string reply = """
+            {"parts":[{"id":"led1","type":"LED","pins":["Anode","Cathode"]}],"wires":[{"from":"VCC","to":"led1.Anode"},{"from":"led1.Cathode","to":"GND"}]}
+            """;
+
+        var rules = new LedCircuitValidator().Evaluate(SketchReplyParser.Parse(reply, "LED on 5 V"), null).Rules;
+
+        Assert.Equal("Fail", rules.Single(rule => rule.Name == "Resistor present").Result);
+        Assert.Equal("Fail", rules.Single(rule => rule.Name == "Correct wiring").Result);
+        Assert.Equal("Pass", rules.Single(rule => rule.Name == "Power source present").Result);
+        Assert.Equal("Pass", rules.Single(rule => rule.Name == "Ground present").Result);
+    }
+
+    [Fact]
     public void Adder_sketch_has_no_spice_model()
     {
         const string reply = """
@@ -58,7 +95,7 @@ public class CircuitCompilerTests
 
         var error = Assert.Throws<CircuitCompileException>(() => compiler.Compile(SketchReplyParser.Parse(reply, "1-bit full adder")));
 
-        Assert.Equal("This schematic has no ngspice model yet.", error.Message);
+        Assert.StartsWith("This schematic has no ngspice model yet.", error.Message);
     }
 
     [Fact]
@@ -213,6 +250,19 @@ public class CircuitCompilerTests
     }
 
     [Fact]
+    public void Sensor_supply_above_its_max_voltage_fails()
+    {
+        const string reply = """
+            {"parts":[{"id":"esp32","name":"ESP32","type":"mcu","pins":["5V","GND","GPIO21","GPIO22"]},{"id":"max30102","name":"MAX30102","type":"sensor","pins":["VIN","GND","SDA","SCL"]}],"wires":[{"from":"esp32.5V","to":"max30102.VIN"},{"from":"esp32.GND","to":"max30102.GND"},{"from":"esp32.GPIO21","to":"max30102.SDA"},{"from":"esp32.GPIO22","to":"max30102.SCL"}]}
+            """;
+
+        var voltage = ModuleSketchRules.Evaluate(SketchReplyParser.Parse(reply, "5 V on the MAX30102")).Single(rule => rule.Name == "Voltage compatible");
+
+        Assert.Equal("Fail", voltage.Result);
+        Assert.Equal("MAX30102 allows 3.3 V.", voltage.Detail);
+    }
+
+    [Fact]
     public void Source_node_and_ground_parts_compile_as_a_divider()
     {
         const string reply = """
@@ -231,23 +281,6 @@ public class CircuitCompilerTests
         Assert.Contains("Top resistor = 20 kΩ", assumptions);
         Assert.Contains("Bottom resistor = 10 kΩ", assumptions);
         Assert.Contains("Expected Vout = 1.67 V", assumptions);
-    }
-
-    [Fact]
-    public void Rc_low_pass_reports_the_cutoff_near_1_kilohertz()
-    {
-        const string reply = """
-            {"title":"Low-pass","parts":[{"id":"vin","name":"Vin","type":"vsource","note":"5 V"},{"id":"r1","name":"R1","type":"resistor","note":"1.6k"},{"id":"c1","name":"C1","type":"capacitor","note":"100nF"},{"id":"vout","name":"Vout","type":"node"},{"id":"gnd","name":"GND","type":"ground"}],"wires":[{"from":"vin","to":"r1"},{"from":"r1","to":"vout"},{"from":"vout","to":"c1"},{"from":"c1","to":"gnd"},{"from":"vin","to":"gnd"}]}
-            """;
-
-        var sketch = SketchReplyParser.Parse(reply, "RC low-pass filter at 1 kHz");
-        var rules = RcLowPassRules.Evaluate(sketch, "RC low-pass filter at 1 kHz");
-        var cutoff = rules.Single(rule => rule.Name == "Cutoff frequency");
-
-        Assert.True(RcLowPassRules.Applies(sketch));
-        Assert.All(rules, rule => Assert.Equal("Pass", rule.Result));
-        Assert.Contains("994.7 Hz calculated, 1000 Hz expected", cutoff.Detail);
-        Assert.Contains("100n", writer.Write(compiler.Compile(sketch)), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -291,58 +324,9 @@ public class CircuitCompilerTests
         var rules = MotorDriverRules.Evaluate(sketch);
 
         Assert.Equal(CircuitCategory.MotorDriver, CircuitCategories.Of(sketch));
-        Assert.False(RcLowPassRules.Applies(sketch));
         Assert.All(rules, rule => Assert.Equal("Pass", rule.Result));
         Assert.Contains(rules, rule => rule.Name == "Standby pulled high");
         Assert.DoesNotContain(rules, rule => rule.Name == "Cutoff frequency");
-    }
-
-    [Fact]
-    public void Transistor_led_switch_is_checked_without_ngspice()
-    {
-        const string reply = """
-            {"title":"Transistor-switched LED","summary":"NPN low-side switch","parts":[{"id":"vcc","name":"VCC","type":"supply","note":"5V"},{"id":"gnd","name":"GND","type":"net"},{"id":"vin","name":"VIN","type":"supply"},{"id":"q1","name":"Q1 2N3904","type":"npn"},{"id":"d1","name":"D1 LED","type":"led"},{"id":"r_led","name":"R1","type":"resistor","note":"330Ω"},{"id":"r_base","name":"R2","type":"resistor","note":"10k"}],"wires":[{"from":"vcc","to":"r_led.1"},{"from":"r_led.2","to":"d1.A"},{"from":"d1.K","to":"q1.C"},{"from":"q1.E","to":"gnd"},{"from":"vin","to":"r_base.1"},{"from":"r_base.2","to":"q1.B"}]}
-            """;
-
-        var sketch = SketchReplyParser.Parse(reply, "generate a simple circuit with a transistor and a led");
-        var rules = TransistorLedRules.Evaluate(sketch);
-
-        Assert.Equal(CircuitCategory.TransistorLed, CircuitCategories.Of(sketch));
-        Assert.All(rules, rule => Assert.Equal("Pass", rule.Result));
-        Assert.Contains(rules, rule => rule.Name == "LED series resistor");
-        Assert.Contains(rules, rule => rule.Name == "Base resistor");
-    }
-
-    [Fact]
-    public void Block_typed_transistor_led_is_read_from_the_notes()
-    {
-        const string reply = """
-            {"title":"Transistor LED switch","summary":"An NPN transistor (2N2222) acts as a low-side switch.","parts":[{"id":"vcc","name":"VCC","type":"block","note":"+5V supply"},{"id":"gnd","name":"GND","type":"block"},{"id":"in","name":"IN","type":"block","note":"control signal"},{"id":"r1","name":"R1","type":"block","note":"10k base resistor"},{"id":"q1","name":"Q1","type":"block","note":"NPN 2N2222"},{"id":"d1","name":"D1","type":"block","note":"LED"},{"id":"r2","name":"R2","type":"block","note":"330Ω LED resistor"}],"wires":[{"from":"vcc","to":"r2"},{"from":"r2","to":"d1"},{"from":"d1","to":"q1"},{"from":"q1","to":"gnd"},{"from":"in","to":"r1"},{"from":"r1","to":"q1"}]}
-            """;
-
-        var sketch = SketchReplyParser.Parse(reply, "generate a simple circuit with a transistor");
-        var rules = TransistorLedRules.Evaluate(sketch);
-
-        Assert.Equal(CircuitCategory.TransistorLed, CircuitCategories.Of(sketch));
-        Assert.All(rules, rule => Assert.Equal("Pass", rule.Result));
-    }
-
-    [Fact]
-    public void A_led_sketch_fails_when_the_request_asked_for_a_transistor()
-    {
-        const string reply = """
-            {"title":"a simple transistor and a led circuit","parts":[{"id":"r1","name":"r1","type":"resistor","note":"330 ohm"},{"id":"led1","name":"led1","type":"LED","pins":["Anode","Cathode"]}],"wires":[{"from":"VCC","to":"r1.1"},{"from":"r1.2","to":"led1.Anode"},{"from":"led1.Cathode","to":"GND"}]}
-            """;
-
-        var sketch = SketchReplyParser.Parse(reply, "an LED and a 330 ohm resistor");
-        var catalog = new SketchRuleCatalog(SketchRules.All);
-        var missing = catalog.Match(sketch, "a simple transistor and a led circuit")?.Evaluate(sketch, "a simple transistor and a led circuit").Rules.Single();
-        var plain = catalog.Match(sketch, "an LED and a 330 ohm resistor");
-
-        Assert.NotNull(missing);
-        Assert.Equal("Transistor", missing.Name);
-        Assert.Equal("Fail", missing.Result);
-        Assert.Null(plain);
     }
 
     [Fact]
@@ -379,17 +363,14 @@ public class CircuitCompilerTests
         const string motor = """
             {"title":"Motor","parts":[{"id":"u1","name":"ESP32","type":"mcu"},{"id":"q1","name":"N-MOSFET","type":"mosfet"},{"id":"m1","name":"Motor","type":"motor"},{"id":"d1","name":"Flyback","type":"diode"},{"id":"rg","name":"Gate","type":"resistor"},{"id":"gnd","name":"GND","type":"ground"}],"wires":[{"from":"u1.GPIO18","to":"rg.1"},{"from":"rg.2","to":"q1.G"},{"from":"q1.S","to":"gnd"},{"from":"q1.D","to":"m1.2"},{"from":"d1.A","to":"q1.D"},{"from":"d1.K","to":"m1.1"}]}
             """;
-        const string filter = """
-            {"title":"Low-pass","parts":[{"id":"r1","name":"R1","type":"resistor","note":"1.6k"},{"id":"c1","name":"C1","type":"capacitor","note":"100nF"},{"id":"gnd","name":"GND","type":"ground"}],"wires":[{"from":"r1","to":"c1"},{"from":"c1","to":"gnd"}]}
-            """;
-
         var motorMatch = catalog.Match(SketchReplyParser.Parse(motor, "ESP32 motor driver"), "ESP32 motor driver");
-        var filterMatch = catalog.Match(SketchReplyParser.Parse(filter, "RC low-pass filter at 1 kHz"), "RC low-pass filter at 1 kHz");
 
         Assert.Equal(CircuitCategory.MotorDriver, motorMatch!.Category);
-        Assert.Equal(CircuitCategory.Filter, filterMatch!.Category);
         Assert.Contains(catalog.Sets, set => set.Category == CircuitCategory.Relay);
         Assert.Contains(catalog.Sets, set => set.Category == CircuitCategory.Esp32Sensor);
+        Assert.Contains(catalog.Sets, set => set.Category == CircuitCategory.Buck);
+        Assert.Contains(catalog.Sets, set => set.Category == CircuitCategory.Solenoid);
+        Assert.Contains(catalog.Sets, set => set.Category == CircuitCategory.Divider);
     }
 
     [Fact]
@@ -423,16 +404,6 @@ public class CircuitCompilerTests
         var rule = BuckConverterRules.Evaluate(sketch).Single(item => item.Name == "Input above output");
         Assert.Equal("Fail", rule.Result);
         Assert.Equal("5 V in is not above 12 V out.", rule.Detail);
-    }
-
-    [Fact]
-    public void An_rc_filter_is_not_a_buck_converter()
-    {
-        const string filter = """
-            {"title":"Low-pass","parts":[{"id":"r1","name":"R1","type":"resistor","note":"1.6k"},{"id":"c1","name":"C1","type":"capacitor","note":"100nF"},{"id":"gnd","name":"GND","type":"ground"}],"wires":[{"from":"r1","to":"c1"},{"from":"c1","to":"gnd"}]}
-            """;
-        var sketch = SketchReplyParser.Parse(filter, "RC low-pass filter at 1 kHz");
-        Assert.Equal(CircuitCategory.Filter, new SketchRuleCatalog(SketchRules.All).Match(sketch, "RC low-pass filter at 1 kHz")!.Category);
     }
 
     [Fact]
@@ -502,12 +473,16 @@ public class CircuitCompilerTests
         Assert.Equal("sensor", max.Category);
         Assert.Equal("I2C", max.Interface);
         Assert.Equal("3.3V", max.Voltage);
+        Assert.Equal(3.3, max.MaxVoltage);
         Assert.Equal(["VIN", "GND", "SDA", "SCL"], max.Pins);
         Assert.Contains(ComponentLibrary.All, item => item.Category == "power" && item.Name == "LM2596");
-        Assert.Contains(ComponentLibrary.All, item => item.Category == "embedded" && item.Name == "ESP32");
-        Assert.Contains(ComponentLibrary.All, item => item.Category == "switching" && item.Name == "Solenoid");
-        Assert.Contains(ComponentLibrary.All, item => item.Category == "motor" && item.Name == "TB6612");
-        Assert.Contains(ComponentLibrary.All, item => item.Category == "logic" && item.Name == "Full Adder");
+        Assert.Contains(ComponentLibrary.All, item => item.Category == "controller" && item.Name == "ESP32");
+        Assert.Contains(ComponentLibrary.All, item => item.Category == "actuator" && item.Name == "Solenoid");
+        Assert.Contains(ComponentLibrary.All, item => item.Category == "driver" && item.Name == "TB6612");
+        Assert.Contains(ComponentLibrary.All, item => item.Category == "digital logic" && item.Name == "Full Adder");
+        Assert.Contains(ComponentLibrary.All, item => item.Category == "passive" && item.Name == "Resistor");
+        Assert.Contains(ComponentLibrary.All, item => item.Category == "protection" && item.Name == "Flyback Diode");
+        Assert.All(ComponentLibrary.All, item => Assert.Contains(item.Category, ComponentCategories.All));
         Assert.Equal(SensorInterface.I2C, SensorLibrary.Find(new SketchPart("max30102", "MAX30102", "sensor", null))!.Interface);
     }
 

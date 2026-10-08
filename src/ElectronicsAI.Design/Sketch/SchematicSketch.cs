@@ -5,9 +5,12 @@ public enum PartCategory
     Unknown,
     Power,
     Passive,
-    Logic,
     Sensor,
+    Controller,
+    Driver,
     Actuator,
+    DigitalLogic,
+    Communication,
     Protection,
 }
 

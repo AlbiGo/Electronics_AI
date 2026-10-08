@@ -4,6 +4,7 @@
     "category": "sensor",
     "interface": "Analog",
     "voltage": "5V",
+    "maxVoltage": 5,
     "pins": ["VCC", "GND", "OUT"]
   },
   {
@@ -11,6 +12,7 @@
     "category": "sensor",
     "interface": "Analog",
     "voltage": "5V",
+    "maxVoltage": 5,
     "pins": ["VCC", "GND", "OUT"]
   },
   {
@@ -18,6 +20,7 @@
     "category": "sensor",
     "interface": "I2C",
     "voltage": "3.3V",
+    "maxVoltage": 3.3,
     "pins": ["VIN", "GND", "SDA", "SCL"]
   },
   {
@@ -25,6 +28,7 @@
     "category": "sensor",
     "interface": "Data",
     "voltage": "3.3V",
+    "maxVoltage": 3.3,
     "pins": ["VCC", "GND", "DATA"]
   },
   {
@@ -32,6 +36,7 @@
     "category": "sensor",
     "interface": "I2C",
     "voltage": "3.3V",
+    "maxVoltage": 3.3,
     "pins": ["VCC", "GND", "SDA", "SCL"]
   },
   {
@@ -39,6 +44,7 @@
     "category": "power",
     "interface": "Divider",
     "voltage": "5V",
+    "maxVoltage": 5,
     "pins": ["IN", "OUT", "GND"]
   },
   {
@@ -46,6 +52,7 @@
     "category": "power",
     "interface": "Linear",
     "voltage": "5V",
+    "maxVoltage": 5,
     "pins": ["IN", "GND", "OUT"]
   },
   {
@@ -53,6 +60,7 @@
     "category": "power",
     "interface": "Buck",
     "voltage": "5V",
+    "maxVoltage": 5,
     "pins": ["VIN", "GND", "SW", "FB", "OUT"]
   },
   {
@@ -60,118 +68,194 @@
     "category": "power",
     "interface": "Boost",
     "voltage": "5V",
+    "maxVoltage": 5,
     "pins": ["VIN", "GND", "SW"]
   },
   {
     "name": "ESP32",
-    "category": "embedded",
+    "category": "controller",
     "interface": "GPIO",
     "voltage": "3.3V",
+    "maxVoltage": 3.3,
     "pins": ["3V3", "5V", "GND", "GPIO21", "GPIO22", "GPIO34"]
   },
   {
     "name": "Arduino",
-    "category": "embedded",
+    "category": "controller",
     "interface": "GPIO",
     "voltage": "5V",
+    "maxVoltage": 5,
     "pins": ["5V", "GND", "A0", "SDA", "SCL"]
   },
   {
     "name": "STM32",
-    "category": "embedded",
+    "category": "controller",
     "interface": "GPIO",
     "voltage": "3.3V",
+    "maxVoltage": 3.3,
     "pins": ["3V3", "GND"]
   },
   {
     "name": "RP2040",
-    "category": "embedded",
+    "category": "controller",
     "interface": "GPIO",
     "voltage": "3.3V",
+    "maxVoltage": 3.3,
     "pins": ["3V3", "GND"]
   },
   {
     "name": "Relay",
-    "category": "switching",
+    "category": "actuator",
     "interface": "Digital",
     "voltage": "5V",
+    "maxVoltage": 5,
     "pins": ["VCC", "GND", "IN"]
   },
   {
     "name": "MOSFET",
-    "category": "switching",
+    "category": "driver",
     "interface": "Digital",
     "voltage": "12V",
+    "maxVoltage": 12,
     "pins": ["Gate", "Drain", "Source"]
   },
   {
     "name": "Solenoid",
-    "category": "switching",
+    "category": "actuator",
     "interface": "Digital",
     "voltage": "12V",
+    "maxVoltage": 12,
     "pins": ["VCC", "Control", "GND"]
   },
   {
     "name": "DC Motor",
-    "category": "motor",
+    "category": "actuator",
     "interface": "PWM",
     "voltage": "12V",
+    "maxVoltage": 12,
     "pins": ["VCC", "GND"]
   },
   {
     "name": "PWM Controller",
-    "category": "motor",
+    "category": "driver",
     "interface": "PWM",
     "voltage": "5V",
+    "maxVoltage": 5,
     "pins": ["PWM", "GND", "VCC"]
   },
   {
     "name": "TB6612",
-    "category": "motor",
+    "category": "driver",
     "interface": "H-Bridge",
     "voltage": "12V",
+    "maxVoltage": 12,
     "pins": ["VM", "VCC", "GND", "AO1", "AO2", "PWMA"]
   },
   {
     "name": "AND Gate",
-    "category": "logic",
+    "category": "digital logic",
     "interface": "Digital",
     "voltage": "5V",
+    "maxVoltage": 5,
     "pins": ["A", "B", "Y"]
   },
   {
     "name": "Half Adder",
-    "category": "logic",
+    "category": "digital logic",
     "interface": "Digital",
     "voltage": "5V",
+    "maxVoltage": 5,
     "pins": ["A", "B", "Sum", "Cout"]
   },
   {
     "name": "Full Adder",
-    "category": "logic",
+    "category": "digital logic",
     "interface": "Digital",
     "voltage": "5V",
+    "maxVoltage": 5,
     "pins": ["A", "B", "Cin", "Sum", "Cout"]
   },
   {
     "name": "Counter",
-    "category": "logic",
+    "category": "digital logic",
     "interface": "Digital",
     "voltage": "5V",
+    "maxVoltage": 5,
     "pins": ["CLK", "Q"]
   },
   {
     "name": "Flip-Flop",
-    "category": "logic",
+    "category": "digital logic",
     "interface": "Digital",
     "voltage": "5V",
+    "maxVoltage": 5,
     "pins": ["T", "CLK", "Q"]
   },
   {
     "name": "Register",
-    "category": "logic",
+    "category": "digital logic",
     "interface": "Digital",
     "voltage": "5V",
+    "maxVoltage": 5,
     "pins": ["D", "CLK", "Q"]
+  },
+  {
+    "name": "Voltage Source",
+    "category": "power",
+    "interface": "Source",
+    "voltage": "5V",
+    "maxVoltage": 5,
+    "pins": ["+", "-"]
+  },
+  {
+    "name": "Battery",
+    "category": "power",
+    "interface": "Source",
+    "voltage": "9V",
+    "maxVoltage": 9,
+    "pins": ["+", "-"]
+  },
+  {
+    "name": "Resistor",
+    "category": "passive",
+    "interface": "Analog",
+    "voltage": "",
+    "pins": ["1", "2"]
+  },
+  {
+    "name": "Capacitor",
+    "category": "passive",
+    "interface": "Analog",
+    "voltage": "",
+    "pins": ["1", "2"]
+  },
+  {
+    "name": "Inductor",
+    "category": "passive",
+    "interface": "Analog",
+    "voltage": "",
+    "pins": ["1", "2"]
+  },
+  {
+    "name": "LED",
+    "category": "actuator",
+    "interface": "Analog",
+    "voltage": "5V",
+    "maxVoltage": 5,
+    "pins": ["Anode", "Cathode"]
+  },
+  {
+    "name": "Flyback Diode",
+    "category": "protection",
+    "interface": "Diode",
+    "voltage": "",
+    "pins": ["A", "K"]
+  },
+  {
+    "name": "Fuse",
+    "category": "protection",
+    "interface": "Series",
+    "voltage": "",
+    "pins": ["1", "2"]
   }
 ]

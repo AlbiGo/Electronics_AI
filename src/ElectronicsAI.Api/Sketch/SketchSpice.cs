@@ -23,6 +23,17 @@ public sealed class SketchSpice(ICircuitCompiler compiler, SpiceNetlistWriter wr
         if (rules.Match(sketch, request) is { } ruleSet)
         {
             var outcome = ruleSet.Evaluate(sketch, request);
+            var validation = outcome.Rules.Select(rule => new SketchCheckView(rule.Name, rule.Detail, rule.Result)).ToList();
+            if (outcome.Simulate)
+            {
+                var operated = Operate(sketch);
+                validation.AddRange(operated.Checks);
+                var assumptions = outcome.Assumptions.Concat(operated.Assumptions).Distinct().ToArray();
+                return operated.Netlist is null
+                    ? new SketchSimulationView(false, operated.Reason, null, null, null, null, validation, assumptions)
+                    : operated with { Checks = validation, Assumptions = assumptions };
+            }
+
             return new SketchSimulationView(
                 false,
                 outcome.Reason,
@@ -30,10 +41,15 @@ public sealed class SketchSpice(ICircuitCompiler compiler, SpiceNetlistWriter wr
                 null,
                 null,
                 null,
-                outcome.Rules.Select(rule => new SketchCheckView(rule.Name, rule.Detail, rule.Result)).ToArray(),
+                validation,
                 outcome.Assumptions);
         }
 
+        return Operate(sketch);
+    }
+
+    private SketchSimulationView Operate(SchematicSketch sketch)
+    {
         try
         {
             var circuit = compiler.Compile(sketch);

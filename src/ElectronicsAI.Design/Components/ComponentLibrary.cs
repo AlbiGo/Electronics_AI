@@ -12,6 +12,8 @@ public sealed class ComponentRecord
 
     public string Voltage { get; init; } = "";
 
+    public double? MaxVoltage { get; init; }
+
     public string[] Pins { get; init; } = [];
 }
 
@@ -27,7 +29,10 @@ public static class ComponentLibrary
     public static ComponentRecord? Find(SketchPart part)
     {
         var text = $"{part.Type} {part.Name}";
-        return All.FirstOrDefault(item => text.Contains(item.Name, StringComparison.OrdinalIgnoreCase));
+        return All
+            .Where(item => text.Contains(item.Name, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(item => item.Name.Length)
+            .FirstOrDefault();
     }
 
     private static IReadOnlyList<ComponentRecord> Load()

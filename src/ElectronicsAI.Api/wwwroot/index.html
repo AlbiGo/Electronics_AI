@@ -65,7 +65,12 @@
       border-color: var(--net);
     }
 
-    body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    body {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto minmax(150px, 210px);
+      height: 100vh;
+      overflow: hidden;
+    }
 
     .workspace {
       flex: 1;
@@ -91,9 +96,7 @@
     .history-item { text-align: left; }
     .history-item.active { border-color: var(--probe); color: var(--probe); }
 
-    #devlog { border-top: 1px solid var(--line); padding-top: 8px; }
-    #devlog summary { cursor: pointer; color: var(--muted); font-size: 13px; }
-    #log { max-height: 160px; }
+    #log { margin: 0; white-space: pre-wrap; }
 
     .viewer { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
     .viewer-bar {
@@ -162,9 +165,18 @@
     #schematic,
     #stage .spinner { position: relative; z-index: 1; }
 
+    .validation {
+      border-top: 1px solid var(--line);
+      background: #141c19;
+      padding: 8px 16px 10px;
+      max-height: 168px;
+      overflow: auto;
+    }
+    .validation h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+    .validation .cards { grid-auto-flow: column; grid-auto-columns: minmax(180px, 240px); grid-template-columns: none; }
+
     .dock {
-      height: 228px;
-      min-height: 160px;
+      min-height: 0;
       display: flex;
       flex-direction: column;
       border-top: 1px solid var(--line);
@@ -197,7 +209,7 @@
     #suggestion { margin: 0 16px 8px; }
 
     @media (max-width: 860px) {
-      body { height: auto; overflow: auto; }
+      body { height: auto; overflow: auto; grid-template-rows: auto auto auto auto; }
       .workspace { grid-template-columns: 1fr; }
       #stage { min-height: 360px; }
     }
@@ -357,11 +369,6 @@
       </form>
       <div class="history-label">History</div>
       <div id="history"></div>
-      <details id="devlog">
-        <summary>Developer log</summary>
-        <pre id="log"></pre>
-        <div id="chat" class="chat"></div>
-      </details>
     </aside>
     <section class="viewer">
       <div class="viewer-bar">
@@ -389,28 +396,33 @@
           <button type="button" id="suggestion-no">No</button>
         </div>
       </div>
-      <div class="dock">
-        <div class="tabs" id="tabs">
-          <button type="button" data-tab="validation" class="active">Validation</button>
-          <button type="button" data-tab="netlist">Netlist</button>
-          <button type="button" data-tab="components">Components</button>
-          <button type="button" data-tab="simulation">Simulation</button>
-        </div>
-        <div class="panel" id="panel-validation">
-          <div id="checks" class="cards"></div>
-        </div>
-        <div class="panel" id="panel-netlist" hidden>
-          <pre id="netlist"></pre>
-        </div>
-        <div class="panel" id="panel-components" hidden>
-          <div id="components"></div>
-        </div>
-        <div class="panel" id="panel-simulation" hidden>
-          <div class="stats" id="stats"></div>
-          <ul id="assumptions" class="assumptions" hidden></ul>
-        </div>
-      </div>
     </section>
+  </div>
+  <section class="validation" aria-label="Validation results">
+    <h3>Validation</h3>
+    <div id="checks" class="cards"></div>
+  </section>
+  <div class="dock">
+    <div class="tabs" id="tabs">
+      <button type="button" data-tab="bom" class="active">BOM</button>
+      <button type="button" data-tab="netlist">Netlist</button>
+      <button type="button" data-tab="simulation">Simulation</button>
+      <button type="button" data-tab="logs">Logs</button>
+    </div>
+    <div class="panel" id="panel-bom">
+      <div id="components"></div>
+    </div>
+    <div class="panel" id="panel-netlist" hidden>
+      <pre id="netlist"></pre>
+    </div>
+    <div class="panel" id="panel-simulation" hidden>
+      <div class="stats" id="stats"></div>
+      <ul id="assumptions" class="assumptions" hidden></ul>
+    </div>
+    <div class="panel" id="panel-logs" hidden>
+      <pre id="log"></pre>
+      <div id="chat" class="chat"></div>
+    </div>
   </div>
   <script>
     let pendingSuggestion = null;
@@ -459,18 +471,12 @@
       document.getElementById("simulate").disabled = busy;
     }
 
-    async function sketch(description, revision) {
-      const text = (revision ? lastDescription : description).trim();
-      if (!text) return;
-      if (!revision) lastDescription = text;
-      const prompt = revision ? `${text}\n\nCorrect the previous circuit. ${revision}` : text;
-      const error = document.getElementById("error");
-      resetScreen();
-      setBusy(true);
-      document.getElementById("title").textContent = "Generating…";
-      remember("user", revision ? "Yes" : text);
-      log("Sending the request");
-      try {
+    function validationPassed(simulation) {
+      const checks = simulation && simulation.checks;
+      return Array.isArray(checks) && checks.length > 0 && checks.every(check => check.result === "Pass");
+    }
+
+    async function requestSketch(prompt) {
       const response = await fetch("/circuits/sketch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -479,8 +485,7 @@
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let drawn = false;
-      let failed = false;
+      const result = {};
       while (true) {
         const chunk = await reader.read();
         if (chunk.done) break;
@@ -498,36 +503,63 @@
             continue;
           }
           if (payload.log) log(payload.log);
-          if (payload.error) {
-            failed = true;
-            setBusy(false);
-            error.hidden = false;
-            error.textContent = payload.error;
-            document.getElementById("title").textContent = "Simulation not finished";
-          }
+          if (payload.error) result.error = payload.error;
           if (payload.sketch) {
-            try {
-              drawn = true;
-              setBusy(false);
-              renderSketch(payload.sketch, payload.simulation, payload.suggestion);
-              remember("assistant", payload.sketch.summary);
-              rememberHistory(text, payload.sketch, payload.simulation, payload.suggestion);
-              log("Simulation finished");
-            } catch (drawError) {
-              drawn = false;
-              failed = true;
-              error.hidden = false;
-              error.textContent = drawError.message;
-              log(`Simulation was not finished: ${drawError.message}`);
-            }
+            result.sketch = payload.sketch;
+            result.simulation = payload.simulation;
+            result.suggestion = payload.suggestion;
           }
         }
       }
-      if (!drawn && !failed) {
+      if (!result.sketch && !result.error) result.error = "The simulation could not be finished.";
+      return result;
+    }
+
+    async function sketch(description, revision) {
+      const text = (revision ? lastDescription : description).trim();
+      if (!text) return;
+      if (!revision) lastDescription = text;
+      const error = document.getElementById("error");
+      resetScreen();
+      setBusy(true);
+      document.getElementById("title").textContent = "Generating…";
+      remember("user", revision ? "Yes" : text);
+      log("Sending the request");
+      let nextRevision = revision || "";
+      let last = null;
+      try {
+        for (let attempt = 1; attempt <= 4; attempt += 1) {
+          if (attempt > 1) {
+            document.getElementById("title").textContent = "Validation failed. Correcting the circuit…";
+            document.getElementById("schematic").innerHTML = "";
+            log("Asking for a corrected circuit");
+          }
+          const prompt = nextRevision ? `${text}\n\nCorrect the previous circuit. ${nextRevision}` : text;
+          const payload = await requestSketch(prompt);
+          if (payload.error) {
+            error.hidden = false;
+            error.textContent = payload.error;
+            document.getElementById("title").textContent = "Simulation not finished";
+            return;
+          }
+          last = payload;
+          if (validationPassed(payload.simulation)) {
+            renderSketch(payload.sketch, payload.simulation, null);
+            remember("assistant", payload.sketch.summary);
+            rememberHistory(text, payload.sketch, payload.simulation, null);
+            log("Validation passed");
+            return;
+          }
+          const problem = payload.suggestion && payload.suggestion.text;
+          log(problem || "Validation did not pass");
+          if (!problem) break;
+          nextRevision = problem;
+        }
+        document.getElementById("schematic").innerHTML = "";
+        document.getElementById("title").textContent = "Validation did not pass";
         error.hidden = false;
-        error.textContent = "The simulation could not be finished.";
-        document.getElementById("title").textContent = "Simulation not finished";
-      }
+        error.textContent = (last && last.suggestion && last.suggestion.text) || "Validation did not pass.";
+        if (last && last.simulation) showChecks(last.simulation);
       } catch (requestError) {
         error.hidden = false;
         error.textContent = requestError.message;
@@ -535,6 +567,19 @@
       } finally {
         setBusy(false);
       }
+    }
+
+    function showChecks(simulation) {
+      const checks = simulation && simulation.checks && simulation.checks.length
+        ? simulation.checks.slice()
+        : [{ name: "Operating point", detail: "This schematic has no ngspice model yet.", result: "Unavailable" }];
+      if (simulation && simulation.inputVolts != null) {
+        checks.push({ name: "Supply voltage", detail: `${Number(simulation.inputVolts).toFixed(1)} V`, result: "Pass" });
+      }
+      document.getElementById("checks").innerHTML = checks.map(check => {
+        const mark = check.result === "Pass" ? "✓" : check.result === "Fail" ? "✗" : "•";
+        return `<article class="card ${esc(check.result)}"><b>${mark} ${esc(check.name)}</b><span>${esc(check.detail)}</span></article>`;
+      }).join("");
     }
 
     function log(line) {
@@ -550,16 +595,7 @@
       document.getElementById("schematic").innerHTML = drawSketch(sketch, simulation && simulation.outputVolts);
       const netlist = simulation && simulation.netlist ? simulation.netlist : "This circuit has no SPICE netlist.";
       document.getElementById("netlist").textContent = netlist;
-      const checks = simulation && simulation.checks && simulation.checks.length
-        ? simulation.checks.slice()
-        : [{ name: "Operating point", detail: "This schematic has no ngspice model yet.", result: "Unavailable" }];
-      if (simulation && simulation.inputVolts != null) {
-        checks.push({ name: "Supply voltage", detail: `${Number(simulation.inputVolts).toFixed(1)} V`, result: "Pass" });
-      }
-      document.getElementById("checks").innerHTML = checks.map(check => {
-        const mark = check.result === "Pass" ? "✓" : check.result === "Fail" ? "✗" : "•";
-        return `<article class="card ${esc(check.result)}"><b>${mark} ${esc(check.name)}</b><span>${esc(check.detail)}</span></article>`;
-      }).join("");
+      showChecks(simulation);
       const parts = sketch.parts || [];
       document.getElementById("components").innerHTML = parts.length
         ? parts.map(part => {
@@ -581,8 +617,11 @@
         offer.hidden = true;
       }
       const stats = [];
-      if (simulation && simulation.inputVolts != null) stats.push(["Voltage source", `${Number(simulation.inputVolts).toFixed(1)} V`]);
-      if (simulation && simulation.loadCurrentAmps != null) stats.push(["Current", `${(simulation.loadCurrentAmps * 1000).toFixed(1)} mA`]);
+      const led = (sketch.parts || []).some(part => /led/i.test(`${part.type} ${part.name}`));
+      if (simulation && simulation.inputVolts != null) stats.push(["Supply voltage", `${Number(simulation.inputVolts).toFixed(1)} V`]);
+      if (simulation && simulation.loadCurrentAmps != null) stats.push([led ? "LED current" : "Current", `${(simulation.loadCurrentAmps * 1000).toFixed(1)} mA`]);
+      const power = (simulation && simulation.checks || []).find(check => check.name === "Resistor power" && /^[0-9.]+\sW/.test(check.detail || ""));
+      if (power) stats.push(["Resistor power", power.detail.split(" in ")[0]]);
       if (simulation && simulation.outputVolts != null) stats.push(["Output", `${Number(simulation.outputVolts).toFixed(2)} V`]);
       document.getElementById("stats").innerHTML = stats.map(([name, value]) =>
         `<div class="stat"><b>${esc(value)}</b><span>${esc(name)}</span></div>`
@@ -722,9 +761,15 @@
       const shown = sketch.parts || [];
       if (shown.length === 0) return "";
       const places = layout(sketch);
+      const labels = {};
+      shown.forEach(part => {
+        const place = places[part.id.toLowerCase()];
+        if (place && place.label) labels[part.id.toLowerCase()] = place.label;
+      });
+      const visible = shown.filter(part => !labels[part.id.toLowerCase()]);
       const pitchX = 150;
       const pitchY = 104;
-      const centers = shown.map(part => {
+      const centers = visible.map(part => {
         const place = places[part.id.toLowerCase()] || { column: 0, row: 0 };
         return { part, cx: 88 + place.column * pitchX, cy: 72 + place.row * pitchY };
       });
@@ -751,14 +796,23 @@
 
       const marks = [];
       const wires = [];
+      const anchors = {};
+      const ink = [];
+      const pinMarks = [];
+      boxes.forEach(box => {
+        const laid = arrangePins(box, partPins(box.part, sketch.wires || []));
+        Object.assign(anchors, laid.anchors);
+        pinMarks.push(laid.marks);
+        ink.push(...laid.ink);
+      });
       const roles = wireRoles(sketch);
-      (sketch.wires || []).forEach(link => {
-        const from = pinEnd(link.from, link.to, boxes, {});
-        const to = pinEnd(link.to, link.from, boxes, {});
+      (sketch.wires || []).forEach((link, index) => {
+        const from = pinEnd(link.from, link.to, boxes, anchors, labels);
+        const to = pinEnd(link.to, link.from, boxes, anchors, labels);
         if (!from || !to) return;
         const start = placed(from, to);
         const end = placed(to, from);
-        const role = roles.get(String(link.from).trim().toLowerCase()) || "signal";
+        const role = roles.get(index) || "signal";
         wires.push(trace(elbowPath(start, end), role));
         if (start.external) wires.push(netLabel(start, role));
         if (end.external) wires.push(netLabel(end, role));
@@ -774,8 +828,9 @@
         marks.push(drawn);
         if (!isBlock(box.part)) {
           if (box.upright) {
-            marks.push(caption(box.x + box.w + 8, box.cy - (value ? 2 : -4), name, "text", "start"));
-            if (value) marks.push(caption(box.x + box.w + 8, box.cy + 14, value, "silk", "start"));
+            const aside = value || shortNote(box.part, name);
+            marks.push(caption(box.x + box.w + 8, box.cy - (aside ? 2 : -4), name, "text", "start"));
+            if (aside) marks.push(caption(box.x + box.w + 8, box.cy + 14, aside, "silk", "start"));
           } else {
             marks.push(caption(box.cx, box.y - 8, name, "text", "middle"));
             if (value) marks.push(caption(box.cx, box.y + box.h + 16, value, "silk", "middle"));
@@ -784,15 +839,19 @@
         marks.push("</g>");
       });
 
-      const right = Math.max(...boxes.map(box => box.x + box.w + (boxes.some(item => item.upright) ? 88 : 36)), 160);
-      const bottom = Math.max(...boxes.map(box => box.y + box.h + 36), 140);
-      return `<svg width="${right}" height="${bottom}" viewBox="0 0 ${right} ${bottom}" role="img" aria-label="Schematic">${wires.join("")}${marks.join("")}</svg>`;
+      const right = Math.max(...boxes.map(box => box.x + box.w + (boxes.some(item => item.upright) ? 112 : 36)), ...ink.map(point => point.x), 160);
+      const bottom = Math.max(...boxes.map(box => box.y + box.h + 56), ...ink.map(point => point.y), 140);
+      const left = Math.min(0, ...ink.map(point => point.x));
+      const top = Math.min(0, ...ink.map(point => point.y));
+      const width = right - left + 8;
+      const height = bottom - top + 8;
+      return `<svg width="${width}" height="${height}" viewBox="${left - 4} ${top - 4} ${width} ${height}" role="img" aria-label="Schematic">${wires.join("")}${marks.join("")}${pinMarks.join("")}</svg>`;
     }
 
     function isSwitch(part) {
-      const type = `${part.type || ""} ${part.name || ""}`.toLowerCase();
+      const type = `${part.type || ""} ${part.name || ""} ${part.note || ""}`.toLowerCase();
       if (/regulator|buck|lm2596|lm2576/.test(type)) return false;
-      return /button|momentary|spst|spdt|(^|[^a-z])switch([^a-z]|$)/.test(type);
+      return /button|momentary|spst|spdt|normally[- ]open|(^|[^a-z])switch([^a-z]|$)/.test(type);
     }
 
     function spread(boxes) {
@@ -860,6 +919,14 @@
       return upright >= across;
     }
 
+    function shortNote(part, name) {
+      let note = String(part.note || "").trim();
+      if (/push\s*button|momentary|spst|normally[- ]open/i.test(note)) note = "Push Button";
+      else if (/^led\b/i.test(note)) note = "LED";
+      if (!note || note.length > 22 || note.toLowerCase() === String(name || "").toLowerCase()) return "";
+      return note;
+    }
+
     function symbolValue(part, volts) {
       const kind = `${part.type || ""} ${part.name || ""}`.toLowerCase();
       if (volts != null && volts !== undefined && /vout|\bnode\b|junction/.test(kind)) {
@@ -878,7 +945,172 @@
       return [part.name || part.id, part.note || "", ...pins].filter(Boolean).join("\n");
     }
 
+    function partPins(part, wires) {
+      const seen = [];
+      const add = pin => {
+        const text = String(pin || "").trim();
+        if (!text || seen.some(item => item.toLowerCase() === text.toLowerCase())) return;
+        seen.push(text);
+      };
+      (part.pins || []).forEach(add);
+      (wires || []).forEach(wire => {
+        [wire.from, wire.to].forEach(end => {
+          const text = String(end || "").trim();
+          const dot = text.indexOf(".");
+          if (dot < 1) return;
+          if (text.slice(0, dot).toLowerCase() !== String(part.id || "").toLowerCase()) return;
+          add(text.slice(dot + 1));
+        });
+      });
+      if (twoLead(part)) defaultPins(part).forEach(add);
+      else if (seen.length === 0) defaultPins(part).forEach(add);
+      return seen.slice(0, 8);
+    }
+
+    function defaultPins(part) {
+      const type = `${part.type || ""} ${part.name || ""} ${part.note || ""}`.toLowerCase();
+      if (/vsource|\bsource\b|\bsupply\b|\bbattery\b/.test(type) && !isSwitch(part)) return [];
+      if (/\bground\b|\bgnd\b/.test(type)) return [];
+      if (type.includes("led")) return ["Anode", "Cathode"];
+      if (type.includes("schottky") || type.includes("diode")) return ["A", "K"];
+      if (/mosfet|nmos/.test(type)) return ["Gate", "Drain", "Source"];
+      if (/pnp|npn|transistor|bjt/.test(type)) return ["Base", "Collector", "Emitter"];
+      if (isSwitch(part) || twoLead(part)) return ["1", "2"];
+      if (isBlock(part)) return ["VCC", "GND"];
+      return [];
+    }
+
+    function symbolFrame(box) {
+      const type = `${box.part.type || ""} ${box.part.name || ""} ${box.part.note || ""}`.toLowerCase();
+      if (isBlock(box.part)) return { x: box.cx - 56, y: box.cy - 29, w: 112, h: 58 };
+      if (twoLead(box.part)) return { x: box.x, y: box.y, w: box.w, h: box.h };
+      if (/mosfet|nmos|npn|pnp|transistor|bjt/.test(type)) return { x: box.cx - 24, y: box.cy - 24, w: 40, h: 48 };
+      return { x: box.cx - 20, y: box.cy - 16, w: 40, h: 32 };
+    }
+
+    function electricalSide(pin, part) {
+      const name = String(pin || "").trim();
+      if (/^(vcc|vdd|vin|vm|\+?5v|3v3|3\.3v)$/i.test(name)) return "top";
+      if (/^(gnd|vss|agnd)$/i.test(name)) return "bottom";
+      const type = `${part.type || ""} ${part.name || ""} ${part.note || ""}`.toLowerCase();
+      if (/mosfet|nmos|npn|pnp|transistor|bjt/.test(type)) {
+        if (/^(gate|base|g|b)$/i.test(name)) return "left";
+        if (/^(drain|collector|d|c)$/i.test(name)) return "top";
+        if (/^(source|emitter|s|e)$/i.test(name)) return "bottom";
+      }
+      return "";
+    }
+
+    function pinPoint(frame, side, index, count) {
+      const along = count === 1 ? 0.5 : (index + 1) / (count + 1);
+      if (side === "top") return { x: frame.x + frame.w * along, y: frame.y, side };
+      if (side === "bottom") return { x: frame.x + frame.w * along, y: frame.y + frame.h, side };
+      if (side === "left") return { x: frame.x, y: frame.y + frame.h * along, side };
+      return { x: frame.x + frame.w, y: frame.y + frame.h * along, side };
+    }
+
+    function arrangePins(box, pins) {
+      const frame = symbolFrame(box);
+      const buckets = { top: [], bottom: [], left: [], right: [] };
+      if (twoLead(box.part) && pins.length >= 2) {
+        if (box.upright) {
+          buckets.top.push(pins[0]);
+          buckets.bottom.push(pins[1]);
+        } else {
+          buckets.left.push(pins[0]);
+          buckets.right.push(pins[1]);
+        }
+      } else {
+        const rest = [];
+        pins.forEach(pin => {
+          const side = electricalSide(pin, box.part);
+          if (side) buckets[side].push(pin);
+          else rest.push(pin);
+        });
+        rest.forEach((pin, index) => buckets[index % 2 === 0 ? "left" : "right"].push(pin));
+      }
+      const anchors = {};
+      const marks = [];
+      const ink = [];
+      const stub = !twoLead(box.part);
+      Object.entries(buckets).forEach(([side, list]) => {
+        list.forEach((pin, index) => {
+          const point = pinPoint(frame, side, index, list.length);
+          anchors[`${box.part.id}.${pin}`.toLowerCase()] = point;
+          const drawn = pinLabel(point, pin, side, stub);
+          marks.push(drawn.mark);
+          ink.push(drawn.start, drawn.end);
+        });
+      });
+      return { anchors, marks: marks.join(""), ink };
+    }
+
+    function pinLabel(point, text, side, stub) {
+      const tick = stub ? 8 : 0;
+      let mark = "";
+      let x = point.x;
+      let y = point.y;
+      let anchor = "start";
+      if (side === "left" || (stub === false && side === "top") || (stub === false && side === "bottom")) {
+        x = point.x - 4;
+        y = side === "bottom" ? point.y - 2 : side === "top" ? point.y + 11 : point.y + 3;
+        anchor = "end";
+        if (stub && side === "left") {
+          mark = `<line x1="${point.x - tick}" y1="${point.y}" x2="${point.x}" y2="${point.y}" stroke="var(--silk)" stroke-width="1.25" />`;
+          x = point.x - tick - 3;
+        }
+      } else if (side === "right") {
+        x = point.x + (stub ? tick + 3 : 4);
+        y = point.y + 3;
+        anchor = "start";
+        if (stub) mark = `<line x1="${point.x}" y1="${point.y}" x2="${point.x + tick}" y2="${point.y}" stroke="var(--silk)" stroke-width="1.25" />`;
+      } else if (side === "top") {
+        x = point.x + 4;
+        y = point.y - tick - 2;
+        anchor = "start";
+        if (stub) mark = `<line x1="${point.x}" y1="${point.y - tick}" x2="${point.x}" y2="${point.y}" stroke="var(--silk)" stroke-width="1.25" />`;
+      } else {
+        x = point.x + 4;
+        y = point.y + tick + 11;
+        anchor = "start";
+        if (stub) mark = `<line x1="${point.x}" y1="${point.y}" x2="${point.x}" y2="${point.y + tick}" stroke="var(--silk)" stroke-width="1.25" />`;
+      }
+      const width = String(text).length * 6.2;
+      const startX = anchor === "end" ? x - width : anchor === "middle" ? x - width / 2 : x;
+      return {
+        mark: `${mark}<text x="${x}" y="${y}" fill="var(--muted)" font-size="10" text-anchor="${anchor}">${esc(text)}</text>`,
+        start: { x: startX, y: y - 10 },
+        end: { x: startX + width, y: y + 2 },
+      };
+    }
+
     function wireRoles(sketch) {
+      const wires = (sketch.wires || []).map(wire => ({
+        from: String(wire.from || "").trim(),
+        to: String(wire.to || "").trim(),
+      }));
+      (sketch.parts || []).forEach(part => {
+        if (!twoLead(part)) return;
+        const id = part.id.toLowerCase();
+        const hits = [];
+        wires.forEach((wire, index) => {
+          if (wire.from.split(".")[0].toLowerCase() === id || wire.to.split(".")[0].toLowerCase() === id) hits.push(index);
+        });
+        if (hits.length !== 2) return;
+        const pins = new Set(hits.map(index => {
+          const wire = wires[index];
+          return (wire.from.split(".")[0].toLowerCase() === id ? wire.from : wire.to).toLowerCase();
+        }));
+        if (pins.size >= 2) return;
+        hits.forEach((index, slot) => {
+          const lead = `${part.id}.${slot === 0 ? "1" : "2"}`;
+          const wire = wires[index];
+          wires[index] = {
+            from: wire.from.toLowerCase() === id ? lead : wire.from,
+            to: wire.to.toLowerCase() === id ? lead : wire.to,
+          };
+        });
+      });
       const parent = new Map();
       const find = key => {
         const name = String(key || "").trim().toLowerCase();
@@ -889,7 +1121,7 @@
         parent.set(name, root);
         return root;
       };
-      (sketch.wires || []).forEach(wire => {
+      wires.forEach(wire => {
         const left = find(wire.from);
         const right = find(wire.to);
         if (left && right && left !== right) parent.set(left, right);
@@ -900,12 +1132,14 @@
         if (!groups.has(root)) groups.set(root, []);
         groups.get(root).push(key);
       }
-      const roles = new Map();
+      const roleOf = new Map();
       for (const keys of groups.values()) {
         const found = keys.map(key => endpointRole(key, sketch.parts || []));
         const role = found.includes("ground") ? "ground" : found.includes("power") ? "power" : found.includes("control") ? "control" : "signal";
-        keys.forEach(key => roles.set(key, role));
+        keys.forEach(key => roleOf.set(key, role));
       }
+      const roles = new Map();
+      wires.forEach((wire, index) => roles.set(index, roleOf.get(find(wire.from)) || "signal"));
       return roles;
     }
 
@@ -914,7 +1148,7 @@
       const id = text.split(".")[0];
       const pin = text.includes(".") ? text.slice(id.length + 1) : "";
       const part = parts.find(item => item.id.toLowerCase() === id.toLowerCase());
-      const kind = part ? `${part.type || ""} ${part.name || ""}`.toLowerCase() : "";
+      const kind = part ? `${part.type || ""} ${part.name || ""} ${part.note || ""}`.toLowerCase() : "";
       if (/^(gnd|vss|agnd|0)$/i.test(text) || /ground|(^|\s)gnd(\s|$)/.test(kind)) return "ground";
       if (/^(vcc|vdd|vin|\+?\d+(?:\.\d+)?v)$/i.test(text) || /vsource|supply|battery/.test(kind)) return "power";
       if (/^(g|gate|b|base)$/i.test(pin) || /gpio|pwm|gate|base/i.test(pin)) return "control";
@@ -1016,8 +1250,60 @@
     }
 
     function layout(sketch) {
-      const netPlaces = layoutNets(sketch);
-      return netPlaces || layoutColumns(sketch);
+      return layoutSeries(sketch) || layoutNets(sketch) || layoutColumns(sketch);
+    }
+
+    function layoutSeries(sketch) {
+      const parts = sketch.parts || [];
+      const wires = sketch.wires || [];
+      const textOf = part => `${part.type || ""} ${part.name || ""} ${part.note || ""}`.toLowerCase();
+      const supplyPart = part => /vsource|\bsource\b|\bsupply\b|\bbattery\b/.test(textOf(part)) && !isSwitch(part);
+      const groundPart = part => /\bground\b|\bgnd\b/.test(textOf(part));
+      const chain = parts.filter(part => twoLead(part) && !supplyPart(part) && !groundPart(part));
+      if (chain.length < 2 || chain.length > 6) return null;
+      if (parts.some(part => !chain.includes(part) && !supplyPart(part) && !groundPart(part))) return null;
+      const idOf = end => String(end || "").trim().split(".")[0].toLowerCase();
+      const byId = {};
+      parts.forEach(part => { byId[part.id.toLowerCase()] = part; });
+      const neighbors = {};
+      chain.forEach(part => { neighbors[part.id.toLowerCase()] = []; });
+      wires.forEach(wire => {
+        const left = idOf(wire.from);
+        const right = idOf(wire.to);
+        const leftChain = Boolean(neighbors[left]);
+        const rightChain = Boolean(neighbors[right]);
+        if (leftChain && rightChain && left !== right) {
+          neighbors[left].push(right);
+          neighbors[right].push(left);
+        } else if (leftChain) neighbors[left].push(String(wire.to || "").trim());
+        else if (rightChain) neighbors[right].push(String(wire.from || "").trim());
+      });
+      const isSupplyEnd = token => /^(\+?\d+(?:\.\d+)?v|vcc|vdd|vin)$/i.test(token) || (byId[idOf(token)] && supplyPart(byId[idOf(token)]));
+      const isGroundEnd = token => /^(gnd|vss|agnd|0)$/i.test(token) || (byId[idOf(token)] && groundPart(byId[idOf(token)]));
+      const start = chain.find(part => neighbors[part.id.toLowerCase()].some(isSupplyEnd));
+      if (!start) return null;
+      const order = [];
+      const seen = new Set();
+      let current = start.id.toLowerCase();
+      while (current && neighbors[current] && !seen.has(current)) {
+        seen.add(current);
+        order.push(current);
+        current = neighbors[current].find(item => neighbors[item] && !seen.has(item)) || "";
+      }
+      if (order.length !== chain.length || !neighbors[order[order.length - 1]].some(isGroundEnd)) return null;
+      const places = Object.fromEntries(order.map((id, row) => [id, { column: 0, row }]));
+      parts.forEach(part => {
+        const id = part.id.toLowerCase();
+        if (places[id]) return;
+        if (supplyPart(part)) places[id] = { label: voltageLabel(part) };
+        else if (groundPart(part)) places[id] = { label: "GND" };
+      });
+      return places;
+    }
+
+    function voltageLabel(part) {
+      const found = `${part.name || ""} ${part.note || ""}`.match(/(\+)?(\d+(?:\.\d+)?)\s*v/i);
+      return found ? `${found[1] || "+"}${found[2]}V` : "+5V";
     }
 
     function layoutNets(sketch) {
@@ -1268,7 +1554,7 @@
       if (type.includes("cap")) return iconCapacitor(cx, cy);
       if (type.includes("schottky") || type.includes("diode")) return iconDiode(cx, cy);
       if (type.includes("ground") || type.includes("gnd")) return ground(cx, cy);
-      if (type.includes("node") || type.includes("junction")) return `<circle cx="${cx}" cy="${cy}" r="5" fill="var(--net)" />`;
+      if (/(^|[^a-z])node([^a-z]|$)/.test(type) || type.includes("junction")) return `<circle cx="${cx}" cy="${cy}" r="5" fill="var(--net)" />`;
       if (type.includes("mosfet") || type.includes("nmos")) return iconMosfet(cx, cy);
       if (type.includes("pnp")) return iconTransistor(cx, cy, true);
       if (type.includes("npn") || type.includes("transistor") || type.includes("bjt") || type.includes("2n") || /(^|\s)q\d/.test(type)) return iconTransistor(cx, cy, false);
@@ -1401,13 +1687,21 @@
         <text x="${cx + 2}" y="${cy + 4}" fill="var(--silk)" font-size="13">Q</text>`;
     }
 
-    function pinEnd(token, other, boxes, anchors) {
+    function pinEnd(token, other, boxes, anchors, labels) {
       const text = String(token || "").trim();
       if (!text) return null;
       const id = text.split(".")[0];
+      if (labels && labels[id.toLowerCase()]) return { external: true, label: labels[id.toLowerCase()] };
       const box = boxes.find(item => item.part.id.toLowerCase() === id.toLowerCase());
       const otherText = String(other || "").trim();
-      const otherBox = boxes.find(item => item.part.id.toLowerCase() === otherText.split(".")[0].toLowerCase());
+      const otherId = otherText.split(".")[0].toLowerCase();
+      const otherBox = boxes.find(item => item.part.id.toLowerCase() === otherId);
+      if (box && !otherBox && labels && labels[otherId]) {
+        const below = /^(gnd|vss|agnd|0)$/i.test(labels[otherId]);
+        return { x: box.x + box.w / 2, y: below ? box.y + box.h : box.y, side: below ? "bottom" : "top" };
+      }
+      const named = anchors && anchors[text.toLowerCase()];
+      if (box && named) return named;
       if (!box) return text.includes(".") ? null : { external: true, label: text };
       if (!otherBox && /^(gnd|vss|agnd|0)$/i.test(otherText)) return { x: box.x + box.w / 2, y: box.y + box.h, side: "bottom" };
       if (!otherBox && /^(vcc|vdd|vin|\+?\d+(?:\.\d+)?v)$/i.test(otherText)) return { x: box.x + box.w / 2, y: box.y, side: "top" };

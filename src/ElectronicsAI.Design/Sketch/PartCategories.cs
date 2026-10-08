@@ -9,7 +9,13 @@ public static class PartCategories
             return null;
         }
 
-        return Enum.TryParse<PartCategory>(text.Trim(), ignoreCase: true, out var category) && category != PartCategory.Unknown
+        var key = text.Trim().Replace(" ", "", StringComparison.Ordinal).Replace("-", "", StringComparison.Ordinal);
+        if (key.Equals("logic", StringComparison.OrdinalIgnoreCase))
+        {
+            key = nameof(PartCategory.DigitalLogic);
+        }
+
+        return Enum.TryParse<PartCategory>(key, ignoreCase: true, out var category) && category != PartCategory.Unknown
             ? category
             : null;
     }
@@ -37,9 +43,24 @@ public static class PartCategories
             return PartCategory.Actuator;
         }
 
-        if (Has(text, "mcu", "esp32", "ecu", "gate", "flip", "adder"))
+        if (Has(text, "mcu", "esp32", "arduino", "stm32", "rp2040", "ecu"))
         {
-            return PartCategory.Logic;
+            return PartCategory.Controller;
+        }
+
+        if (Has(text, "mosfet", "transistor", "npn", "tb6612", "h-bridge", "hbridge", "driver"))
+        {
+            return PartCategory.Driver;
+        }
+
+        if (Has(text, "gate", "flip", "adder", "counter", "register"))
+        {
+            return PartCategory.DigitalLogic;
+        }
+
+        if (Has(text, "uart", "transceiver", "rs485"))
+        {
+            return PartCategory.Communication;
         }
 
         if (Has(text, "lm2596", "lm2576", "regulator", "buck", "supply", "vsource", "battery"))

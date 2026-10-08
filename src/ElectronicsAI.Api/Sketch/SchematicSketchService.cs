@@ -13,7 +13,6 @@ public sealed class SchematicSketchService(HttpClient http, LanguageModelOptions
         Describe the circuit the user asked for. Reply with one short JSON object and nothing else.
         Ripple counter: {"kind":"ripple-counter","bits":8,"title":"8-bit ripple counter","summary":"Each T input is tied high so the flip-flop toggles on every clock edge."}
         Any other circuit: {"title":"...","summary":"...","parts":[{"id":"r1","name":"R1","type":"block","note":"10k"}],"wires":[{"from":"r1","to":"r2"}]}
-        If the user asks for a transistor, include that transistor in parts. A transistor and an LED need the transistor, the LED, a series resistor, and a base resistor.
         A buck converter needs the switching regulator, an inductor, a Schottky diode, an input capacitor, and an output capacitor. Set category to power, passive, logic, sensor, actuator, or protection.
         A temperature sensor and an ECU, with no solenoid requested, is only those two parts. Wire the sensor VCC and the ECU VCC to 5V, the sensor GND and the ECU GND to GND, and the sensor Output to the ECU TempIn. Do not add a solenoid, switch, MOSFET, or fan.
         Add a solenoid only when the user asks for one: temperature sensor Output to TempIn, switch to SwitchIn, SolenoidOut through a gate resistor to an N-MOSFET, a flyback diode across the coil, a shared ground, and a coil supply such as +12V. Do not wire the solenoid to an ECU pin.

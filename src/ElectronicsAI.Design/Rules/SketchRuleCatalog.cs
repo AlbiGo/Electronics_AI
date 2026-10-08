@@ -4,7 +4,8 @@ public sealed record SketchRuleResult(
     string Reason,
     IReadOnlyList<SketchRule> Rules,
     IReadOnlyList<string> Assumptions,
-    bool AttachNetlist = false);
+    bool AttachNetlist = false,
+    bool Simulate = false);
 
 public interface ISketchRuleSet
 {
