@@ -6,7 +6,9 @@ public static class MotorFamily
 {
     private static readonly PartQuery BridgePart = new(["tb6612", "h-bridge", "hbridge", "drv8833", "l298", "l293", "bts7960"], PartText.TypeName);
 
-    private static readonly PartQuery MotorPart = new(["motor", "solenoid", "pump"], PartText.TypeName);
+    private static readonly PartQuery MotorPart = new(["motor", "pump"], PartText.TypeName);
+
+    private static readonly PartQuery SolenoidPart = new(["solenoid"], PartText.TypeName);
 
     private static readonly PartQuery DiodePart = new(["diode"]);
 
@@ -52,7 +54,7 @@ public static class MotorFamily
     {
         Category = CircuitCategory.MotorDriver,
         Reason = "Motor driver checked without ngspice.",
-        When = static board => !RelayFamily.Pattern.When(board) && !Bridge.When(board)
+        When = static board => !RelayFamily.Pattern.When(board) && !Bridge.When(board) && !board.Has(SolenoidPart)
             && (board.Has(MotorPart) || (board.Has(MosfetApply) && board.Has(DiodePart) && board.Has(Controller))),
         Checks =
         [

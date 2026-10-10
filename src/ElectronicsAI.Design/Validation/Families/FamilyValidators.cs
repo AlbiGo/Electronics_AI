@@ -75,6 +75,7 @@ public sealed class DigitalLogicValidator : ISketchRuleSet
         LogicFamily.Matches(sketch)
         && !RelayDriverRules.Applies(sketch)
         && !SolenoidFamily.Pattern.Applies(sketch, request)
+        && !LowSideLedFamily.Pattern.Applies(sketch, request)
         && !MotorDriverRules.Applies(sketch)
         && !BuckConverterRules.Applies(sketch, request)
         && !Esp32SensorFamily.Matches(sketch);
@@ -84,6 +85,15 @@ public sealed class DigitalLogicValidator : ISketchRuleSet
             "Digital logic checked without ngspice.",
             [new SketchRule("Logic recognized", "The sketch is digital logic.", "Pass")],
             []);
+}
+
+public sealed class LowSideLedValidator : ISketchRuleSet
+{
+    public CircuitCategory Category => CircuitCategory.LowSideLed;
+
+    public bool Applies(SchematicSketch sketch, string? request) => LowSideLedFamily.Pattern.Applies(sketch, request);
+
+    public SketchRuleResult Evaluate(SchematicSketch sketch, string? request) => LowSideLedFamily.Pattern.Evaluate(sketch, request);
 }
 
 public sealed class SolenoidDriverValidator : ISketchRuleSet

@@ -7,9 +7,11 @@ public static class ValidationEngine
         ..PowerSupplyValidator.Sets,
         RelayDriverValidator.Shared,
         new SolenoidDriverValidator(),
+        new LowSideLedValidator(),
         MotorDriverValidator.Shared,
         SensorCircuitValidator.Shared,
         new DigitalLogicValidator(),
+        new ControllerIoValidator(),
         new LedCircuitValidator(),
     ];
 

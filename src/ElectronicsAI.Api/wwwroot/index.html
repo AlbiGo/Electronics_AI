@@ -18,10 +18,13 @@
       --heat: #e08a4f;
       --fail: #e07a7a;
       --face: #24332e;
-      --power: #e06a5c;
-      --signal: #6fbf73;
-      --control: #e2b657;
-      --gnd: #9aa3a8;
+      --power: #ef5d4c;
+      --signal: #3dcf73;
+      --analog: #5aa2ff;
+      --bus: #e2c15a;
+      --control: #e2c15a;
+      --gnd: #1b1f22;
+      --gnd-edge: #f4f7f8;
     }
 
     * { box-sizing: border-box; }
@@ -67,7 +70,7 @@
 
     body {
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr) auto minmax(150px, 210px);
+      grid-template-rows: auto minmax(0, 1fr) auto minmax(96px, 132px);
       height: 100vh;
       overflow: hidden;
     }
@@ -76,7 +79,7 @@
       flex: 1;
       min-height: 0;
       display: grid;
-      grid-template-columns: 300px minmax(0, 1fr);
+      grid-template-columns: 220px minmax(0, 1fr);
     }
 
     .side {
@@ -109,6 +112,14 @@
     .viewer-bar h2 { font-size: 16px; }
     .viewer-bar p { margin: 2px 0 0; }
     .tools { display: flex; gap: 6px; flex-wrap: wrap; }
+    .net-key { display: flex; gap: 14px; align-items: center; padding: 6px 16px 0; color: var(--muted); font-size: 12px; }
+    .net-key span { display: inline-flex; align-items: center; gap: 6px; }
+    .net-key i { width: 18px; height: 3px; border-radius: 2px; display: inline-block; }
+    .net-key i.power { background: var(--power); }
+    .net-key i.gnd { background: var(--gnd-edge); box-shadow: inset 0 0 0 1.5px var(--gnd); }
+    .net-key i.digital { background: var(--signal); }
+    .net-key i.analog { background: var(--analog); }
+    .net-key i.bus { background: var(--bus); }
 
     #stage {
       position: relative;
@@ -169,7 +180,7 @@
       border-top: 1px solid var(--line);
       background: #141c19;
       padding: 8px 16px 10px;
-      max-height: 168px;
+      max-height: 112px;
       overflow: auto;
     }
     .validation h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
@@ -224,18 +235,30 @@
     .symbol { cursor: help; }
     .symbol:hover { filter: brightness(1.3); }
 
+
     #schematic svg {
       width: auto;
       max-width: none;
       height: auto;
       display: block;
+      shape-rendering: geometricPrecision;
+    }
+
+    #schematic svg :not(.trace) {
+      stroke-width: 1;
+      stroke-linejoin: miter;
+      stroke-linecap: butt;
     }
 
     .trace {
       fill: none;
-      stroke-width: 2.25;
-      stroke-linejoin: round;
-      stroke-linecap: round;
+      stroke-width: 1.15;
+      stroke-linejoin: miter;
+      stroke-linecap: butt;
+    }
+
+    .trace.edge {
+      stroke-width: 2.35;
     }
 
     .stat {
@@ -313,7 +336,9 @@
 
     #suggestion[hidden] { display: none; }
     #suggestion p { margin: 0; }
-    #suggestion .choices { display: flex; gap: 8px; }
+    #suggestion .choices { display: flex; gap: 8px; flex-wrap: wrap; }
+    #suggestion-choices button { display: grid; gap: 4px; max-width: 280px; text-align: left; }
+    #suggestion-choices span { color: var(--muted); font-size: 12px; white-space: normal; }
 
     h2 { font-size: 16px; margin: 0; }
 
@@ -384,6 +409,13 @@
           <button type="button" id="export-png">Export PNG</button>
         </div>
       </div>
+      <div class="net-key" aria-label="Net colors">
+        <span><i class="power"></i>Power</span>
+        <span><i class="gnd"></i>Ground</span>
+        <span><i class="digital"></i>GPIO</span>
+        <span><i class="analog"></i>Analog</span>
+        <span><i class="bus"></i>Bus</span>
+      </div>
       <div id="stage">
         <div id="spinner" class="spinner" hidden><span></span>Simulating</div>
         <div id="schematic"></div>
@@ -391,7 +423,8 @@
       <p class="error" id="error" hidden></p>
       <div id="suggestion" hidden>
         <p id="suggestion-text"></p>
-        <div class="choices">
+        <div id="suggestion-choices" class="choices"></div>
+        <div id="suggestion-actions" class="choices">
           <button type="button" id="suggestion-yes" class="primary">Yes</button>
           <button type="button" id="suggestion-no">No</button>
         </div>
@@ -508,6 +541,8 @@
             result.sketch = payload.sketch;
             result.simulation = payload.simulation;
             result.suggestion = payload.suggestion;
+            result.layout = payload.layout;
+            result.choices = payload.choices;
           }
         }
       }
@@ -523,7 +558,8 @@
       resetScreen();
       setBusy(true);
       document.getElementById("title").textContent = "Generating…";
-      remember("user", revision ? "Yes" : text);
+      const note = !revision ? text : revision.startsWith("Chosen LED driver:") ? revision.slice(0, revision.indexOf(".")) : "Yes";
+      remember("user", note);
       log("Sending the request");
       let nextRevision = revision || "";
       let last = null;
@@ -543,10 +579,15 @@
             return;
           }
           last = payload;
+          if (payload.choices && payload.choices.length) {
+            offerChoices(payload.choices);
+            log("Choose which LED driver to draw");
+            return;
+          }
           if (validationPassed(payload.simulation)) {
-            renderSketch(payload.sketch, payload.simulation, null);
+            renderSketch(payload.sketch, payload.simulation, null, payload.layout);
             remember("assistant", payload.sketch.summary);
-            rememberHistory(text, payload.sketch, payload.simulation, null);
+            rememberHistory(text, payload.sketch, payload.simulation, null, payload.layout);
             log("Validation passed");
             return;
           }
@@ -569,6 +610,31 @@
       }
     }
 
+    function offerChoices(choices) {
+      pendingSuggestion = null;
+      document.getElementById("schematic").innerHTML = "";
+      document.getElementById("title").textContent = "Choose a circuit";
+      document.getElementById("summary").textContent = "This LED driver can be drawn three ways. Choose one.";
+      document.getElementById("suggestion-text").textContent = "This LED driver can be drawn three ways. Choose one.";
+      document.getElementById("suggestion-actions").hidden = true;
+      const row = document.getElementById("suggestion-choices");
+      row.replaceChildren();
+      choices.forEach(choice => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.prompt = choice.prompt;
+        button.innerHTML = `<b>${esc(choice.label)}</b><span>${esc(choice.detail)}</span>`;
+        row.appendChild(button);
+      });
+      document.getElementById("suggestion").hidden = false;
+    }
+
+    document.getElementById("suggestion-choices").onclick = event => {
+      const button = event.target.closest("button");
+      if (!button || !button.dataset.prompt) return;
+      sketch(lastDescription, button.dataset.prompt);
+    };
+
     function showChecks(simulation) {
       const checks = simulation && simulation.checks && simulation.checks.length
         ? simulation.checks.slice()
@@ -589,10 +655,10 @@
       panel.scrollTop = panel.scrollHeight;
     }
 
-    function renderSketch(sketch, simulation, suggestion) {
+    function renderSketch(sketch, simulation, suggestion, layout) {
       document.getElementById("title").textContent = sketch.title || "Generated circuit";
       document.getElementById("summary").textContent = shownSummary(sketch.summary, simulation && simulation.outputVolts);
-      document.getElementById("schematic").innerHTML = drawSketch(sketch, simulation && simulation.outputVolts);
+      document.getElementById("schematic").innerHTML = drawSketch(sketch, simulation && simulation.outputVolts, layout);
       const netlist = simulation && simulation.netlist ? simulation.netlist : "This circuit has no SPICE netlist.";
       document.getElementById("netlist").textContent = netlist;
       showChecks(simulation);
@@ -608,6 +674,8 @@
       assumptionList.hidden = assumptions.length === 0;
       assumptionList.innerHTML = assumptions.map(line => `<li>${esc(line)}</li>`).join("");
       const offer = document.getElementById("suggestion");
+      document.getElementById("suggestion-choices").replaceChildren();
+      document.getElementById("suggestion-actions").hidden = false;
       if (suggestion && suggestion.text) {
         pendingSuggestion = suggestion.text;
         document.getElementById("suggestion-text").textContent = suggestion.text;
@@ -629,8 +697,8 @@
       requestAnimationFrame(fitSchematic);
     }
 
-    function rememberHistory(description, sketch, simulation, suggestion) {
-      history.unshift({ description, title: sketch.title || description, sketch, simulation, suggestion });
+    function rememberHistory(description, sketch, simulation, suggestion, layout) {
+      history.unshift({ description, title: sketch.title || description, sketch, simulation, suggestion, layout });
       if (history.length > 12) history.pop();
       const list = document.getElementById("history");
       list.innerHTML = history.map((item, index) =>
@@ -645,7 +713,7 @@
       if (!item) return;
       lastDescription = item.description;
       document.getElementById("description").value = item.description;
-      renderSketch(item.sketch, item.simulation, item.suggestion);
+      renderSketch(item.sketch, item.simulation, item.suggestion, item.layout);
       document.querySelectorAll(".history-item").forEach(entry => entry.classList.toggle("active", entry === button));
     };
 
@@ -749,16 +817,121 @@
       return category && detail ? `${category} · ${detail}` : category || detail;
     }
 
-    function drawSketch(sketch, volts) {
+    function drawSketch(sketch, volts, layout) {
       const parts = sketch.parts || [];
       if (parts.length === 0 && sketch.diagram) {
         return `<pre class="diagram">${esc(sketch.diagram)}</pre>`;
       }
+      if (layout && layout.parts && layout.parts.length) return drawLayout(sketch, layout, volts);
       return drawBlocks(sketch, volts);
     }
 
+    function drawLayout(sketch, layout, volts) {
+      const byId = {};
+      (sketch.parts || []).forEach(part => { byId[String(part.id).toLowerCase()] = part; });
+      const marks = [];
+      const wires = [];
+      const ink = [];
+      layout.parts.forEach(place => {
+        const part = byId[String(place.id).toLowerCase()] || { id: place.id, name: place.id };
+        const icon = deviceIcon(part, place.x, place.y);
+        const drawn = place.upright ? `<g transform="rotate(90 ${place.x} ${place.y})">${icon}</g>` : icon;
+        const value = symbolValue(part, volts);
+        const name = part.name || part.id;
+        marks.push(`<g class="symbol"><title>${esc(hoverText(part))}</title>${drawn}</g>`);
+        marks.push(caption(place.x, place.y - place.height / 2 - 14, name, "text", "middle"));
+        if (value && !isBlock(part)) marks.push(caption(place.x, place.y + place.height / 2 + 18, value, "silk", "middle"));
+        (place.pins || []).forEach(pin => {
+          marks.push(`<g><title>${esc(pin.name)}</title><circle cx="${pin.x}" cy="${pin.y}" r="3" fill="var(--text)" /></g>`);
+          ink.push({ x: pin.x, y: pin.y });
+        });
+        ink.push({ x: place.x - place.width / 2, y: place.y - place.height / 2 - 20 }, { x: place.x + place.width / 2 + 36, y: place.y + place.height / 2 + 28 });
+      });
+      const drawn = [];
+      (layout.wires || []).forEach(wire => {
+        const points = wire.points || [];
+        if (points.length < 2) return;
+        if (wireReach(points) > 190) {
+          drawNetEnds(wire, points, wires, ink);
+          return;
+        }
+        const path = points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x},${point.y}`).join(" ");
+        wires.push(trace(path, wire.role || "signal"));
+        points.forEach(point => ink.push(point));
+        drawn.push(wire);
+      });
+      const power = drawn.filter(wire => wire.role === "power").flatMap(wire => wire.points || []);
+      if (power.length) {
+        const top = power.reduce((best, point) => point.y < best.y ? point : best, power[0]);
+        const powerWire = drawn.find(wire => wire.role === "power") || {};
+        const label = [powerWire.from, powerWire.to].map(end => {
+          const text = String(end || "");
+          return text.includes(".") ? text.split(".").pop() : text;
+        }).find(end => /^(3v3|3\.3v|\+?3v|\+?5v|vcc|vdd|vin)$/i.test(end)) || "3V3";
+        const labelY = top.y - 14;
+        wires.push(trace(`M${top.x},${top.y} L${top.x},${labelY}`, "power"));
+        wires.push(caption(top.x, labelY - 2, label, "power", "middle"));
+      }
+      const grounds = drawn.filter(wire => wire.role === "ground").flatMap(wire => wire.points || []);
+      if (grounds.length) {
+        const bottom = grounds.reduce((best, point) => point.y > best.y ? point : best, grounds[0]);
+        wires.push(ground(bottom.x, bottom.y));
+      }
+      const right = Math.max(...ink.map(point => point.x), 160);
+      const bottomEdge = Math.max(...ink.map(point => point.y), 140) + 24;
+      const left = Math.min(0, ...ink.map(point => point.x)) - 16;
+      const topEdge = Math.min(0, ...ink.map(point => point.y)) - 16;
+      return `<svg viewBox="${left} ${topEdge} ${right - left + 24} ${bottomEdge - topEdge}" xmlns="http://www.w3.org/2000/svg">${wires.join("")}${marks.join("")}</svg>`;
+    }
+
+    function wireReach(points) {
+      let length = 0;
+      for (let index = 1; index < points.length; index += 1) {
+        length += Math.abs(points[index].x - points[index - 1].x) + Math.abs(points[index].y - points[index - 1].y);
+      }
+      return length;
+    }
+
+    function netName(wire) {
+      const pins = [wire.from, wire.to].map(end => {
+        const text = String(end || "");
+        return (text.includes(".") ? text.split(".").pop() : text).trim();
+      });
+      const rail = pins.find(pin => /^(gpio\d*|gp\d+|io\d+|d\d+|pwm\d*|3v3|3\.3v|\+3v3|\+3\.3v|\+?5v|vcc|vdd|vin|gnd|vss|agnd|out)$/i.test(pin));
+      if (!rail) return pins.find(pin => !/^(1|2|a|b)$/i.test(pin)) || pins[0] || "NET";
+      if (/gnd|vss|agnd/i.test(rail)) return "GND";
+      if (/3\.?3/i.test(rail)) return "3V3";
+      if (/^\+?5v$/i.test(rail)) return "+5V";
+      if (/vcc/i.test(rail)) return "VCC";
+      if (/vdd/i.test(rail)) return "VDD";
+      return rail.toUpperCase();
+    }
+
+    function drawNetEnds(wire, points, wires, ink) {
+      const name = netName(wire);
+      const tone = wire.role === "power" ? "power" : wire.role === "ground" ? "gnd" : "signal";
+      [[points[0], points[1]], [points[points.length - 1], points[points.length - 2]]].forEach(([at, toward]) => {
+        const horizontal = Math.abs(toward.x - at.x) >= Math.abs(toward.y - at.y);
+        const ux = horizontal ? Math.sign(toward.x - at.x || 1) : 0;
+        const uy = horizontal ? 0 : Math.sign(toward.y - at.y || 1);
+        const tip = { x: at.x + ux * 16, y: at.y + uy * 16 };
+        wires.push(trace(`M${at.x},${at.y} L${tip.x},${tip.y}`, wire.role || "signal"));
+        const anchor = ux < 0 ? "end" : ux > 0 ? "start" : "middle";
+        const label = { x: tip.x + ux * 6, y: tip.y + (uy < 0 ? -6 : uy > 0 ? 14 : -6) };
+        wires.push(caption(label.x, label.y, name, tone, anchor));
+        ink.push(at, tip, label);
+      });
+    }
+
+    function railBody(part) {
+      const token = value => /^(3v3|3\.3v|\+3v3|\+3\.3v|vcc|vdd|vin|5v|\+5v|gnd|vss|agnd|0)$/i.test(String(value || "").trim());
+      const kind = `${part.type || ""} ${part.name || ""}`.toLowerCase();
+      if (/mcu|esp32|esp8266|arduino|stm32|rp2040/.test(kind) || twoLead(part)) return false;
+      return token(part.id) || token(part.name);
+    }
+
     function drawBlocks(sketch, volts) {
-      const shown = sketch.parts || [];
+      const shown = (sketch.parts || []).filter(part => !railBody(part));
       if (shown.length === 0) return "";
       const places = layout(sketch);
       const labels = {};
@@ -806,17 +979,85 @@
         ink.push(...laid.ink);
       });
       const roles = wireRoles(sketch);
-      (sketch.wires || []).forEach((link, index) => {
-        const from = pinEnd(link.from, link.to, boxes, anchors, labels);
-        const to = pinEnd(link.to, link.from, boxes, anchors, labels);
-        if (!from || !to) return;
-        const start = placed(from, to);
-        const end = placed(to, from);
-        const role = roles.get(index) || "signal";
-        wires.push(trace(elbowPath(start, end), role));
-        if (start.external) wires.push(netLabel(start, role));
-        if (end.external) wires.push(netLabel(end, role));
+      const routed = bindPins(sketch, boxes, anchors, labels).map((wire, index) => {
+        const role = railRole(wire, roles.get(index) || "signal");
+        return { ...wire, role };
       });
+      const railTop = Math.min(...boxes.map(box => box.y)) - 36;
+      const railBottom = Math.max(...boxes.map(box => box.y + box.h)) + 42;
+      const powerRails = new Map();
+      const groundDrops = [];
+      let channel = 0;
+      const railName = wire => [wire.start, wire.end].map(end => end && end.label).find(label => label && (isPowerName(label) || isGroundName(label)));
+      const dropToRail = (pin, railY) => {
+        const outward = pin.side === "left" ? -1 : pin.side === "right" ? 1 : 0;
+        if (!outward) return [pin, { x: pin.x, y: railY }];
+        channel += 1;
+        const x = pin.x + outward * (18 + channel * 14);
+        return [pin, { x: pin.x + outward * 14, y: pin.y }, { x, y: pin.y }, { x, y: railY }];
+      };
+      routed.forEach(wire => {
+        if (wire.role === "power") {
+          const pin = wire.start.external ? wire.end : wire.start;
+          const name = railName(wire) || "VCC";
+          if (!powerRails.has(name)) powerRails.set(name, { y: railTop - (powerRails.size * 18), xs: [] });
+          const group = powerRails.get(name);
+          wire.points = pin.external ? [wire.start, wire.end] : dropToRail(pin, group.y);
+          if (!pin.external) group.xs.push(wire.points[wire.points.length - 1].x);
+          wire.rail = true;
+          wire.junction = !pin.external;
+        } else if (wire.role === "ground") {
+          const pin = wire.start.external ? wire.end : wire.start;
+          wire.points = pin.external ? [wire.start, wire.end] : dropToRail(pin, railBottom);
+          if (!pin.external) groundDrops.push(wire.points[wire.points.length - 1].x);
+          wire.rail = true;
+          wire.junction = !pin.external;
+        } else {
+          wire.points = signalRoute(wire.start, wire.end);
+        }
+      });
+      powerRails.forEach(group => {
+        if (!group.xs.length) return;
+        const x0 = Math.min(...group.xs);
+        const x1 = Math.max(...group.xs);
+        routed.push({ role: "power", rail: true, points: [{ x: x0, y: group.y }, { x: x1, y: group.y }], label: "" });
+      });
+      if (groundDrops.length) {
+        const x0 = Math.min(...groundDrops);
+        const x1 = Math.max(...groundDrops);
+        routed.push({ role: "ground", rail: true, points: [{ x: x0, y: railBottom }, { x: x1, y: railBottom }], label: "" });
+      }
+      const hops = routed.map(() => []);
+      for (let left = 0; left < routed.length; left += 1) {
+        for (let right = left + 1; right < routed.length; right += 1) {
+          if (!routed[left].points || !routed[right].points) continue;
+          if (routed[left].role === routed[right].role) continue;
+          const hit = segmentCrossing(routed[left].points, routed[right].points);
+          if (!hit) continue;
+          const owner = hit.horizontal ? right : left;
+          hops[owner].push({ x: hit.x, y: hit.y });
+        }
+      }
+      const dots = [];
+      routed.forEach((wire, index) => {
+        if (!wire.points) return;
+        wires.push(trace(pathWithHops(wire.points, hops[index]), wire.role));
+        if (!wire.rail && wire.label) {
+          const labelAt = avoidBoxes(netLabelPoint(wire.points), boxes);
+          if (labelAt) {
+            wires.push(caption(labelAt.x, labelAt.y, wire.label, wire.role === "bus" ? "bus" : wire.role === "analog" ? "analog" : "signal", "middle"));
+            ink.push({ x: labelAt.x - wire.label.length * 3.4, y: labelAt.y - 12 }, { x: labelAt.x + wire.label.length * 3.4, y: labelAt.y + 2 });
+          }
+        }
+        if (wire.junction) dots.push({ ...wire.points[wire.points.length - 1], role: wire.role });
+      });
+      powerRails.forEach((group, name) => {
+        if (!group.xs.length) return;
+        wires.push(caption(Math.min(...group.xs), group.y - 8, name, "power", "middle"));
+        ink.push({ x: Math.min(...group.xs) - 16, y: group.y - 20 });
+      });
+      if (groundDrops.length) wires.push(ground(Math.min(...groundDrops), railBottom));
+      dots.forEach(dot => wires.push(`<circle cx="${dot.x}" cy="${dot.y}" r="2.4" fill="${dot.role === "power" ? "var(--power)" : "var(--gnd-edge)"}" />`));
 
       boxes.forEach(box => {
         const icon = deviceIcon(box.part, box.cx, box.cy);
@@ -877,7 +1118,7 @@
 
     function isBlock(part) {
       const type = `${part.type || ""} ${part.name || ""}`.toLowerCase();
-      return /ecu|temperature|thermistor|tmp36|lm35|(^|[^a-z])ntc([^a-z]|$)/.test(type);
+      return /ecu|temperature|thermistor|tmp36|lm35|(^|[^a-z])ntc([^a-z]|$)|mcu|esp32|esp8266|arduino|stm32|rp2040/.test(type);
     }
 
     function blockLabel(part) {
@@ -908,6 +1149,7 @@
         const otherToken = ends.find(end => end !== mine) || "";
         const other = centers.find(center => center.part.id.toLowerCase() === otherToken.split(".")[0].toLowerCase());
         if (!other) {
+          if (isGroundName(otherToken) || isPowerName(otherToken)) return;
           upright += 1;
           return;
         }
@@ -923,6 +1165,7 @@
       let note = String(part.note || "").trim();
       if (/push\s*button|momentary|spst|normally[- ]open/i.test(note)) note = "Push Button";
       else if (/^led\b/i.test(note)) note = "LED";
+      note = note.replace(/\b(\+?\d+(?:\.\d+)?\s*v|3v3|vcc|vdd|gnd)\b/ig, " ").replace(/\s+/g, " ").trim();
       if (!note || note.length > 22 || note.toLowerCase() === String(name || "").toLowerCase()) return "";
       return note;
     }
@@ -933,6 +1176,8 @@
         return `${Number(volts).toFixed(2)} V`;
       }
       const note = String(part.note || "");
+      const cell = note.match(/(\d+(?:\.\d+)?)\s*v\b/i);
+      if (cell && /source|supply|battery|vsource/.test(kind)) return cell[0];
       const ohm = note.match(/(\d+(?:\.\d+)?)\s*(k|m)?\s*(?:ohms?|Ω)/i);
       if (ohm) return `${ohm[1]}${(ohm[2] || "").toLowerCase()}Ω`;
       const unit = note.match(/(\d+(?:\.\d+)?)\s*[µμunpm]?[fh]\b/i);
@@ -985,7 +1230,7 @@
       if (isBlock(box.part)) return { x: box.cx - 56, y: box.cy - 29, w: 112, h: 58 };
       if (twoLead(box.part)) return { x: box.x, y: box.y, w: box.w, h: box.h };
       if (/mosfet|nmos|npn|pnp|transistor|bjt/.test(type)) return { x: box.cx - 24, y: box.cy - 24, w: 40, h: 48 };
-      return { x: box.cx - 20, y: box.cy - 16, w: 40, h: 32 };
+      return { x: box.cx - 16, y: box.cy - 14, w: 32, h: 28 };
     }
 
     function electricalSide(pin, part) {
@@ -1012,13 +1257,29 @@
     function arrangePins(box, pins) {
       const frame = symbolFrame(box);
       const buckets = { top: [], bottom: [], left: [], right: [] };
+      const anchors = {};
+      const marks = [];
+      const ink = [];
       if (twoLead(box.part) && pins.length >= 2) {
+        const kind = `${box.part.type || ""} ${box.part.name || ""} ${box.part.note || ""}`.toLowerCase();
+        const led = kind.includes("led");
         if (box.upright) {
           buckets.top.push(pins[0]);
           buckets.bottom.push(pins[1]);
         } else {
-          buckets.left.push(pins[0]);
-          buckets.right.push(pins[1]);
+          const left = led ? box.cx - 28 : box.cx - 26;
+          const right = led ? box.cx + 24 : box.cx + 26;
+          const leads = [
+            [pins[0], { x: left, y: box.cy, side: "left" }],
+            [pins[1], { x: right, y: box.cy, side: "right" }],
+          ];
+          leads.forEach(([pin, point]) => {
+            anchors[`${box.part.id}.${pin}`.toLowerCase()] = point;
+            const drawn = pinLabel(point, pin, point.side, false);
+            marks.push(drawn.mark);
+            ink.push(drawn.start, drawn.end);
+          });
+          return { anchors, marks: marks.join(""), ink };
         }
       } else {
         const rest = [];
@@ -1027,11 +1288,8 @@
           if (side) buckets[side].push(pin);
           else rest.push(pin);
         });
-        rest.forEach((pin, index) => buckets[index % 2 === 0 ? "left" : "right"].push(pin));
+        rest.forEach(pin => buckets.right.push(pin));
       }
-      const anchors = {};
-      const marks = [];
-      const ink = [];
       const stub = !twoLead(box.part);
       Object.entries(buckets).forEach(([side, list]) => {
         list.forEach((pin, index) => {
@@ -1046,41 +1304,43 @@
     }
 
     function pinLabel(point, text, side, stub) {
-      const tick = stub ? 8 : 0;
-      let mark = "";
+      const dot = `<circle cx="${point.x}" cy="${point.y}" r="2" fill="var(--text)" />`;
+      let leader = "";
       let x = point.x;
       let y = point.y;
       let anchor = "start";
-      if (side === "left" || (stub === false && side === "top") || (stub === false && side === "bottom")) {
-        x = point.x - 4;
-        y = side === "bottom" ? point.y - 2 : side === "top" ? point.y + 11 : point.y + 3;
+      if (side === "left") {
+        const reach = stub ? 14 : 0;
+        if (reach) leader = `<line x1="${point.x - reach}" y1="${point.y}" x2="${point.x}" y2="${point.y}" stroke="var(--text)" stroke-width="1.5" />`;
+        x = point.x - reach - 4;
+        y = point.y - 6;
         anchor = "end";
-        if (stub && side === "left") {
-          mark = `<line x1="${point.x - tick}" y1="${point.y}" x2="${point.x}" y2="${point.y}" stroke="var(--silk)" stroke-width="1.25" />`;
-          x = point.x - tick - 3;
-        }
       } else if (side === "right") {
-        x = point.x + (stub ? tick + 3 : 4);
-        y = point.y + 3;
+        const reach = stub ? 14 : 0;
+        if (reach) leader = `<line x1="${point.x}" y1="${point.y}" x2="${point.x + reach}" y2="${point.y}" stroke="var(--text)" stroke-width="1.5" />`;
+        x = point.x + reach + 4;
+        y = point.y - 6;
         anchor = "start";
-        if (stub) mark = `<line x1="${point.x}" y1="${point.y}" x2="${point.x + tick}" y2="${point.y}" stroke="var(--silk)" stroke-width="1.25" />`;
       } else if (side === "top") {
-        x = point.x + 4;
-        y = point.y - tick - 2;
+        const reach = stub ? 12 : 0;
+        if (reach) leader = `<line x1="${point.x}" y1="${point.y - reach}" x2="${point.x}" y2="${point.y}" stroke="var(--text)" stroke-width="1.5" />`;
+        x = point.x + 6;
+        y = point.y - reach - 4;
         anchor = "start";
-        if (stub) mark = `<line x1="${point.x}" y1="${point.y - tick}" x2="${point.x}" y2="${point.y}" stroke="var(--silk)" stroke-width="1.25" />`;
       } else {
-        x = point.x + 4;
-        y = point.y + tick + 11;
+        const reach = stub ? 12 : 0;
+        if (reach) leader = `<line x1="${point.x}" y1="${point.y}" x2="${point.x}" y2="${point.y + reach}" stroke="var(--text)" stroke-width="1.5" />`;
+        x = point.x + 6;
+        y = point.y + reach + 12;
         anchor = "start";
-        if (stub) mark = `<line x1="${point.x}" y1="${point.y}" x2="${point.x}" y2="${point.y + tick}" stroke="var(--silk)" stroke-width="1.25" />`;
       }
-      const width = String(text).length * 6.2;
-      const startX = anchor === "end" ? x - width : anchor === "middle" ? x - width / 2 : x;
+      const width = Math.max(12, String(text).length * 6.6);
+      const left = anchor === "end" ? x - width : x;
+      const plate = `<rect x="${left - 3}" y="${y - 11}" width="${width + 6}" height="14" rx="2" fill="#141816" />`;
       return {
-        mark: `${mark}<text x="${x}" y="${y}" fill="var(--muted)" font-size="10" text-anchor="${anchor}">${esc(text)}</text>`,
-        start: { x: startX, y: y - 10 },
-        end: { x: startX + width, y: y + 2 },
+        mark: `${leader}${dot}${plate}<text x="${x}" y="${y}" fill="var(--text)" font-size="12" font-weight="600" text-anchor="${anchor}">${esc(text)}</text>`,
+        start: { x: left - 3, y: y - 11 },
+        end: { x: left + width + 6, y: y + 3 },
       };
     }
 
@@ -1135,7 +1395,8 @@
       const roleOf = new Map();
       for (const keys of groups.values()) {
         const found = keys.map(key => endpointRole(key, sketch.parts || []));
-        const role = found.includes("ground") ? "ground" : found.includes("power") ? "power" : found.includes("control") ? "control" : "signal";
+        const rank = ["ground", "power", "bus", "analog", "digital"];
+        const role = rank.find(item => found.includes(item)) || "signal";
         keys.forEach(key => roleOf.set(key, role));
       }
       const roles = new Map();
@@ -1149,10 +1410,20 @@
       const pin = text.includes(".") ? text.slice(id.length + 1) : "";
       const part = parts.find(item => item.id.toLowerCase() === id.toLowerCase());
       const kind = part ? `${part.type || ""} ${part.name || ""} ${part.note || ""}`.toLowerCase() : "";
-      if (/^(gnd|vss|agnd|0)$/i.test(text) || /ground|(^|\s)gnd(\s|$)/.test(kind)) return "ground";
-      if (/^(vcc|vdd|vin|\+?\d+(?:\.\d+)?v)$/i.test(text) || /vsource|supply|battery/.test(kind)) return "power";
-      if (/^(g|gate|b|base)$/i.test(pin) || /gpio|pwm|gate|base/i.test(pin)) return "control";
+      if (isGroundName(text) || isGroundName(pin) || /ground|(^|\s)gnd(\s|$)/.test(kind)) return "ground";
+      if (isPowerName(text) || isPowerName(pin) || /vsource|supply|battery/.test(kind)) return "power";
+      if (/^(sda|scl|mosi|miso|sck|sclk|sdi|sdo|cs|ss)$/i.test(pin)) return "bus";
+      if (/^(adc\d*|a\d+|ain\d*|out|output|temp|analog)$/i.test(pin)) return "analog";
+      if (/gpio|pwm|(^io\d+$)|(^d\d+$)|^(g|gate|b|base)$/i.test(pin)) return "digital";
       return "";
+    }
+
+    function isPowerName(text) {
+      return /^(vcc|vdd|vin|3v3|\+?3\.3v|\+?\d+(?:\.\d+)?v)$/i.test(String(text || "").trim());
+    }
+
+    function isGroundName(text) {
+      return /^(gnd|vss|agnd|0)$/i.test(String(text || "").trim());
     }
 
     function layoutColumns(sketch) {
@@ -1250,7 +1521,66 @@
     }
 
     function layout(sketch) {
-      return layoutSeries(sketch) || layoutNets(sketch) || layoutColumns(sketch);
+      return layoutGpioRows(sketch) || layoutSeries(sketch) || layoutNets(sketch) || layoutColumns(sketch);
+    }
+
+    function layoutGpioRows(sketch) {
+      const parts = sketch.parts || [];
+      const wires = sketch.wires || [];
+      const controller = parts.filter(part => /mcu|esp32|esp8266|arduino|stm32|rp2040/.test(`${part.type || ""} ${part.name || ""}`.toLowerCase()));
+      if (controller.length !== 1) return null;
+      const host = controller[0];
+      const hostId = host.id.toLowerCase();
+      const idOf = end => String(end || "").trim().split(".")[0].toLowerCase();
+      const pinOf = end => {
+        const text = String(end || "").trim();
+        const dot = text.indexOf(".");
+        return dot < 0 ? "" : text.slice(dot + 1);
+      };
+      const signalPin = pin => /^(gpio\d*|io\d+|d\d+|adc\d*|a\d+|sda|scl|mosi|miso|sck|sclk|sdi|sdo|cs|ss)$/i.test(pin);
+      if (parts.some(part => part.id.toLowerCase() !== hostId && !twoLead(part) && !railBody(part))) return null;
+      const neighbors = {};
+      parts.forEach(part => {
+        if (twoLead(part)) neighbors[part.id.toLowerCase()] = [];
+      });
+      const outside = {};
+      wires.forEach(wire => {
+        const left = idOf(wire.from);
+        const right = idOf(wire.to);
+        const leftLead = Boolean(neighbors[left]);
+        const rightLead = Boolean(neighbors[right]);
+        if (leftLead && rightLead && left !== right) {
+          neighbors[left].push(right);
+          neighbors[right].push(left);
+        } else if (leftLead) (outside[left] || (outside[left] = [])).push(String(wire.to || "").trim());
+        else if (rightLead) (outside[right] || (outside[right] = [])).push(String(wire.from || "").trim());
+      });
+      const gpioToken = list => (list || []).find(token => idOf(token) === hostId && signalPin(pinOf(token)));
+      const used = new Set();
+      const rows = [];
+      Object.keys(neighbors).forEach(start => {
+        if (used.has(start) || !gpioToken(outside[start])) return;
+        const order = [];
+        const seen = new Set();
+        let current = start;
+        while (current && neighbors[current] && !seen.has(current)) {
+          seen.add(current);
+          used.add(current);
+          order.push(current);
+          current = neighbors[current].find(item => neighbors[item] && !seen.has(item)) || "";
+        }
+        rows.push(order);
+      });
+      if (!rows.length || Object.keys(neighbors).some(id => !used.has(id))) return null;
+      const places = {
+        [hostId]: { column: 0, row: (rows.length - 1) / 2 },
+      };
+      rows.forEach((order, row) => {
+        order.forEach((id, column) => {
+          places[id] = { column: column + 1, row };
+        });
+      });
+      return places;
     }
 
     function layoutSeries(sketch) {
@@ -1593,18 +1923,18 @@
     }
 
     function iconMosfet(cx, cy) {
-      const gate = cx - 8;
-      const channel = cx - 2;
-      return `<line x1="${cx - 24}" y1="${cy}" x2="${gate}" y2="${cy}" stroke="var(--silk)" stroke-width="1.5" />
+      const gate = cx - 16;
+      const channel = cx - 10;
+      return `<line x1="${cx - 32}" y1="${cy}" x2="${gate}" y2="${cy}" stroke="var(--silk)" stroke-width="1.5" />
         <line x1="${gate}" y1="${cy - 12}" x2="${gate}" y2="${cy + 12}" stroke="var(--silk)" stroke-width="1.5" />
         <line x1="${channel}" y1="${cy - 12}" x2="${channel}" y2="${cy - 4}" stroke="var(--silk)" stroke-width="2.25" />
         <line x1="${channel}" y1="${cy - 1}" x2="${channel}" y2="${cy + 1}" stroke="var(--silk)" stroke-width="2.25" />
         <line x1="${channel}" y1="${cy + 4}" x2="${channel}" y2="${cy + 12}" stroke="var(--silk)" stroke-width="2.25" />
-        <line x1="${channel}" y1="${cy - 8}" x2="${cx + 12}" y2="${cy - 8}" stroke="var(--silk)" stroke-width="1.5" />
-        <line x1="${cx + 12}" y1="${cy - 8}" x2="${cx + 12}" y2="${cy - 22}" stroke="var(--silk)" stroke-width="1.5" />
-        <line x1="${channel}" y1="${cy + 8}" x2="${cx + 12}" y2="${cy + 8}" stroke="var(--silk)" stroke-width="1.5" />
-        <line x1="${cx + 12}" y1="${cy + 8}" x2="${cx + 12}" y2="${cy + 22}" stroke="var(--silk)" stroke-width="1.5" />
-        <polygon points="${cx + 6},${cy + 4} ${cx + 12},${cy + 8} ${cx + 6},${cy + 12}" fill="var(--silk)" />`;
+        <line x1="${channel}" y1="${cy - 8}" x2="${cx}" y2="${cy - 8}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${cx}" y1="${cy - 8}" x2="${cx}" y2="${cy - 24}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${channel}" y1="${cy + 8}" x2="${cx}" y2="${cy + 8}" stroke="var(--silk)" stroke-width="1.5" />
+        <line x1="${cx}" y1="${cy + 8}" x2="${cx}" y2="${cy + 24}" stroke="var(--silk)" stroke-width="1.5" />
+        <polygon points="${cx - 6},${cy + 4} ${cx},${cy + 8} ${cx - 6},${cy + 12}" fill="var(--silk)" />`;
     }
 
     function iconLed(cx, cy) {
@@ -1664,13 +1994,7 @@
     function iconChip(cx, cy) {
       const x = cx - 16;
       const y = cy - 14;
-      let legs = "";
-      for (let index = 0; index < 3; index++) {
-        const pinY = y + 6 + index * 8;
-        legs += `<line x1="${x - 7}" y1="${pinY}" x2="${x}" y2="${pinY}" stroke="var(--silk)" stroke-width="1.5" />`;
-        legs += `<line x1="${x + 32}" y1="${pinY}" x2="${x + 39}" y2="${pinY}" stroke="var(--silk)" stroke-width="1.5" />`;
-      }
-      return `${legs}<rect x="${x}" y="${y}" width="32" height="28" rx="2" fill="none" stroke="var(--silk)" stroke-width="1.5" />
+      return `<rect x="${x}" y="${y}" width="32" height="28" rx="2" fill="none" stroke="var(--silk)" stroke-width="1.5" />
         <circle cx="${x + 7}" cy="${y + 7}" r="2" fill="var(--probe)" />`;
     }
 
@@ -1685,6 +2009,69 @@
     function iconFlop(cx, cy) {
       return `<polygon points="${cx - 18},${cy - 12} ${cx - 6},${cy} ${cx - 18},${cy + 12}" fill="none" stroke="var(--probe)" stroke-width="1.5" />
         <text x="${cx + 2}" y="${cy + 4}" fill="var(--silk)" font-size="13">Q</text>`;
+    }
+
+    function bindPins(sketch, boxes, anchors, labels) {
+      const used = new Map();
+      const idOf = end => String(end || "").trim().split(".")[0].toLowerCase();
+      const boxOf = end => boxes.find(box => box.part.id.toLowerCase() === idOf(end));
+      const claim = (box, sides) => {
+        const id = box.part.id.toLowerCase();
+        if (!used.has(id)) used.set(id, new Set());
+        const all = Object.entries(anchors).filter(([key]) => key.startsWith(`${id}.`));
+        const free = all.filter(([key]) => !used.get(id).has(key));
+        const pool = free.length ? free : all;
+        const chosen = sides.map(side => pool.find(([, point]) => point.side === side)).find(Boolean) || pool[0];
+        if (!chosen) return { x: box.cx, y: box.cy, side: "right" };
+        used.get(id).add(chosen[0]);
+        return { ...chosen[1] };
+      };
+      const resolve = (token, other) => {
+        const text = String(token || "").trim();
+        const box = boxOf(text);
+        if (!box) return { external: true, label: (labels && labels[idOf(text)]) || text };
+        const key = text.toLowerCase();
+        if (text.includes(".") && anchors[key]) return { ...anchors[key] };
+        const otherText = String(other || "");
+        const otherBox = boxOf(otherText);
+        if (isGroundName(otherText)) return claim(box, ["bottom", "right", "left", "top"]);
+        if (isPowerName(otherText)) return claim(box, ["top", "right", "left", "bottom"]);
+        if (otherBox && otherBox.cx < box.cx) return claim(box, ["left", "top", "bottom", "right"]);
+        if (otherBox && otherBox.cx > box.cx) return claim(box, ["right", "bottom", "top", "left"]);
+        return claim(box, ["left", "right", "top", "bottom"]);
+      };
+      return (sketch.wires || []).map(link => {
+        const start = resolve(link.from, link.to);
+        const end = resolve(link.to, link.from);
+        return { start, end, label: signalLabel(link) };
+      }).filter(wire => wire.start && wire.end);
+    }
+
+    function railRole(wire, role) {
+      const label = end => String((end && end.label) || "");
+      if (isGroundName(label(wire.start)) || isGroundName(label(wire.end))) return "ground";
+      if (isPowerName(label(wire.start)) || isPowerName(label(wire.end))) return "power";
+      return role;
+    }
+
+    function signalRoute(start, end) {
+      if (Math.abs(start.y - end.y) < 2 || Math.abs(start.x - end.x) < 2) return [start, end];
+      const step = point => {
+        if (point.side === "left") return { x: point.x - 16, y: point.y };
+        if (point.side === "right") return { x: point.x + 16, y: point.y };
+        if (point.side === "top") return { x: point.x, y: point.y - 16 };
+        if (point.side === "bottom") return { x: point.x, y: point.y + 16 };
+        return { x: point.x, y: point.y };
+      };
+      const left = step(start);
+      const right = step(end);
+      return [start, left, { x: left.x, y: right.y }, right, end];
+    }
+
+    function avoidBoxes(point, boxes) {
+      if (!point) return point;
+      const hit = boxes.find(box => point.x >= box.x - 6 && point.x <= box.x + box.w + 6 && point.y >= box.y - 16 && point.y <= box.y + box.h + 22);
+      return hit ? { x: point.x, y: hit.y - 16 } : point;
     }
 
     function pinEnd(token, other, boxes, anchors, labels) {
@@ -1703,8 +2090,8 @@
       const named = anchors && anchors[text.toLowerCase()];
       if (box && named) return named;
       if (!box) return text.includes(".") ? null : { external: true, label: text };
-      if (!otherBox && /^(gnd|vss|agnd|0)$/i.test(otherText)) return { x: box.x + box.w / 2, y: box.y + box.h, side: "bottom" };
-      if (!otherBox && /^(vcc|vdd|vin|\+?\d+(?:\.\d+)?v)$/i.test(otherText)) return { x: box.x + box.w / 2, y: box.y, side: "top" };
+      if (!otherBox && isGroundName(otherText)) return { x: box.x + box.w / 2, y: box.y + box.h, side: "bottom" };
+      if (!otherBox && isPowerName(otherText)) return { x: box.x + box.w / 2, y: box.y, side: "top" };
       if (otherBox) {
         const dx = (otherBox.x + otherBox.w / 2) - (box.x + box.w / 2);
         const dy = (otherBox.y + otherBox.h / 2) - (box.y + box.h / 2);
@@ -1734,20 +2121,122 @@
       return { x: other.x + outward, y: other.y, side: other.side, external: true, label: end.label };
     }
 
-    function elbowPath(start, end) {
-      if (Math.abs(start.y - end.y) < 1) return `M${start.x},${start.y} L${end.x},${end.y}`;
-      if (Math.abs(start.x - end.x) < 1) return `M${start.x},${start.y} L${end.x},${end.y}`;
-      if (start.side === "top" || start.side === "bottom" || end.side === "top" || end.side === "bottom") {
-        const midY = Math.round((start.y + end.y) / 2);
-        return `M${start.x},${start.y} L${start.x},${midY} L${end.x},${midY} L${end.x},${end.y}`;
+    function signalLabel(link) {
+      const named = [link.from, link.to].map(end => {
+        const text = String(end || "").trim();
+        const pin = text.includes(".") ? text.slice(text.indexOf(".") + 1) : text;
+        return /^(gpio\d*|io\d+|d\d+|adc\d*|a\d+|sda|scl|mosi|miso|sck|sclk|sdi|sdo|cs|ss)$/i.test(pin) ? pin : "";
+      }).find(Boolean);
+      return named || "";
+    }
+
+    function controllerEnd(token, boxes) {
+      const id = String(token || "").split(".")[0].toLowerCase();
+      const box = boxes.find(item => item.part.id.toLowerCase() === id);
+      return Boolean(box && /mcu|esp32|esp8266|arduino|stm32|rp2040/.test(`${box.part.type || ""} ${box.part.name || ""}`.toLowerCase()));
+    }
+
+    function stubRoute(start, end, gap) {
+      if (Math.abs(start.y - end.y) < 2) return [start, end];
+      const outward = start.side === "left" ? -1 : 1;
+      const x = start.x + outward * gap;
+      return [start, { x, y: start.y }, { x, y: end.y }, end];
+    }
+
+    function netLabelPoint(points) {
+      let best = null;
+      let span = 0;
+      for (let index = 0; index < points.length - 1; index += 1) {
+        const from = points[index];
+        const to = points[index + 1];
+        const width = Math.abs(from.x - to.x);
+        if (Math.abs(from.y - to.y) > 1 || width <= span) continue;
+        span = width;
+        best = { x: (from.x + to.x) / 2, y: Math.min(from.y, to.y) - 8 };
       }
-      const mid = Math.round((start.x + end.x) / 2);
-      return `M${start.x},${start.y} L${mid},${start.y} L${mid},${end.y} L${end.x},${end.y}`;
+      return best;
+    }
+    function elbowPoints(start, end, lane) {
+      const shift = Math.round(lane * 14);
+      if (Math.abs(start.y - end.y) < 1 || Math.abs(start.x - end.x) < 1) return [start, end];
+      const vertical = start.side === "top" || start.side === "bottom" || end.side === "top" || end.side === "bottom";
+      if (vertical) {
+        const midY = Math.round((start.y + end.y) / 2) + shift;
+        return [start, { x: start.x, y: midY }, { x: end.x, y: midY }, end];
+      }
+      const midX = Math.round((start.x + end.x) / 2) + shift;
+      return [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end];
+    }
+
+    function segmentCrossing(left, right) {
+      const lines = points => {
+        const found = [];
+        for (let index = 0; index < points.length - 1; index += 1) found.push([points[index], points[index + 1]]);
+        return found;
+      };
+      const leftLines = lines(left);
+      const rightLines = lines(right);
+      for (let i = 0; i < leftLines.length; i += 1) {
+        for (let j = 0; j < rightLines.length; j += 1) {
+          const hit = crossAt(leftLines[i], rightLines[j]);
+          if (!hit) continue;
+          const leftHorizontal = Math.abs(leftLines[i][0].y - leftLines[i][1].y) < 1;
+          return { x: hit.x, y: hit.y, horizontal: !leftHorizontal };
+        }
+      }
+      return null;
+    }
+
+    function crossAt(first, second) {
+      const horizontal = pair => Math.abs(pair[0].y - pair[1].y) < 1;
+      if (horizontal(first) === horizontal(second)) return null;
+      const across = horizontal(first) ? first : second;
+      const down = horizontal(first) ? second : first;
+      const y = across[0].y;
+      const x = down[0].x;
+      const within = (value, a, b) => value > Math.min(a, b) + 6 && value < Math.max(a, b) - 6;
+      if (!within(x, across[0].x, across[1].x) || !within(y, down[0].y, down[1].y)) return null;
+      return { x, y };
+    }
+
+    function pathWithHops(points, hops) {
+      const radius = 6;
+      let path = `M${points[0].x},${points[0].y}`;
+      for (let index = 0; index < points.length - 1; index += 1) {
+        const from = points[index];
+        const to = points[index + 1];
+        const horizontal = Math.abs(from.y - to.y) < 1;
+        if (!horizontal) {
+          path += ` L${to.x},${to.y}`;
+          continue;
+        }
+        const direction = to.x >= from.x ? 1 : -1;
+        const jumps = hops
+          .filter(hop => Math.abs(hop.y - from.y) < 1 && (hop.x - from.x) * direction > radius && (to.x - hop.x) * direction > radius)
+          .sort((a, b) => (a.x - b.x) * direction);
+        jumps.forEach(hop => {
+          const begin = hop.x - direction * radius;
+          const finish = hop.x + direction * radius;
+          const sweep = direction > 0 ? 0 : 1;
+          path += ` L${begin},${from.y} A${radius},${radius} 0 0 ${sweep} ${finish},${from.y}`;
+        });
+        path += ` L${to.x},${to.y}`;
+      }
+      return path;
+    }
+
+    function elbowPath(start, end) {
+      return pathWithHops(elbowPoints(start, end, 0), []);
     }
 
     function trace(path, role) {
-      const stroke = role === "power" ? "var(--power)" : role === "ground" ? "var(--gnd)" : role === "control" ? "var(--control)" : "var(--signal)";
-      return `<path class="trace" stroke="${stroke}" d="${path}" />`;
+      const stroke = role === "power" ? "var(--power)"
+        : role === "ground" ? "var(--gnd)"
+        : role === "analog" ? "var(--analog)"
+        : role === "bus" || role === "control" ? "var(--bus)"
+        : "var(--signal)";
+      const edge = role === "ground" ? `<path class="trace edge" stroke="var(--gnd-edge)" d="${path}" />` : "";
+      return `${edge}<path class="trace" stroke="${stroke}" d="${path}" />`;
     }
 
     function flow(path, duration) {
@@ -1759,7 +2248,7 @@
     }
 
     function netLabel(end, role) {
-      const tone = role === "power" ? "power" : role === "ground" ? "gnd" : role === "control" ? "control" : "signal";
+      const tone = role === "power" ? "power" : role === "ground" ? "gnd" : role === "analog" ? "analog" : role === "bus" || role === "control" ? "bus" : "signal";
       if (/^(gnd|vss|agnd|0)$/i.test(String(end.label))) {
         const y = end.side === "top" ? end.y - 16 : end.y;
         return ground(end.x, y);
@@ -1772,15 +2261,16 @@
     }
 
     function ground(x, y) {
-      return `<line x1="${x - 14}" y1="${y}" x2="${x + 14}" y2="${y}" stroke="var(--gnd)" stroke-width="1.5" />
-        <line x1="${x - 9}" y1="${y + 6}" x2="${x + 9}" y2="${y + 6}" stroke="var(--gnd)" stroke-width="1.5" />
-        <line x1="${x - 4}" y1="${y + 12}" x2="${x + 4}" y2="${y + 12}" stroke="var(--gnd)" stroke-width="1.5" />`;
+      return `<line x1="${x - 14}" y1="${y}" x2="${x + 14}" y2="${y}" stroke="var(--gnd-edge)" stroke-width="1.5" />
+        <line x1="${x - 9}" y1="${y + 6}" x2="${x + 9}" y2="${y + 6}" stroke="var(--gnd-edge)" stroke-width="1.5" />
+        <line x1="${x - 4}" y1="${y + 12}" x2="${x + 4}" y2="${y + 12}" stroke="var(--gnd-edge)" stroke-width="1.5" />`;
     }
 
     function caption(x, y, text, tone, anchor = "start", id = "") {
       const fill = tone === "power" ? "var(--power)"
-        : tone === "gnd" ? "var(--gnd)"
-        : tone === "control" ? "var(--control)"
+        : tone === "gnd" ? "var(--gnd-edge)"
+        : tone === "analog" ? "var(--analog)"
+        : tone === "bus" || tone === "control" ? "var(--bus)"
         : tone === "signal" ? "var(--signal)"
         : tone === "probe" ? "var(--probe)"
         : tone === "silk" ? "var(--silk)"

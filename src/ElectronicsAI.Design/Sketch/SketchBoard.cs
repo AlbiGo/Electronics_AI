@@ -89,11 +89,11 @@ public sealed class SketchBoard
 
     public bool Marked(string end, Mark mark) => mark switch
     {
-        Mark.Ground => IsNamed(end, "GND", "VSS", "0"),
+        Mark.Ground => IsNamed(end, "GND", "VSS", "AGND", "DGND", "PGND", "GROUND", "0"),
         Mark.WireSupply => IsToken(end, "VCC", "VDD", "5V", "+5V"),
         Mark.WireGround => IsToken(end, "GND", "0", "VSS"),
         Mark.MotorDiscreteSupply => IsToken(end, "VCC", "VMOT", "+5V", "5V", "12V", "+12V") || TypeHas(Owner(end), "supply", "vsource"),
-        Mark.MotorFlybackSupply => IsToken(end, "VCC", "VMOT", "+5V", "5V", "12V", "+12V") || TypeHas(Owner(end), "supply", "vsource", "battery"),
+        Mark.MotorFlybackSupply => IsToken(end, "VCC", "VMOT", "VM", "VBAT", "V_MOTOR", "+5V", "5V", "12V", "+12V", "24V", "+24V") || TypeHas(Owner(end), "supply", "vsource", "battery") || NameHas(Owner(end), "supply", "12v", "vmot", "vbat"),
         Mark.RelaySupply => IsToken(end, "VCC", "VDD", "+5V", "5V") || TypeHas(Owner(end), "supply", "vsource", "source"),
         Mark.TransistorSupply => IsTransistorSupply(end),
         Mark.LogicHigh => IsToken(end, "VCC", "VMOT", "+5V", "5V", "12V", "3V3") || IsNamed(end, "3V3") || TypeHas(Owner(end), "supply", "vsource", "battery"),
@@ -129,7 +129,8 @@ public sealed class SketchBoard
             || text.Contains("arduino", StringComparison.OrdinalIgnoreCase)
             || text.Contains("stm32", StringComparison.OrdinalIgnoreCase)
             || text.Contains("rp2040", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("ecu", StringComparison.OrdinalIgnoreCase);
+            || text.Contains("ecu", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("controller", StringComparison.OrdinalIgnoreCase);
     }
 
     public static bool IsModule(SketchPart part)
@@ -199,6 +200,7 @@ public sealed class SketchBoard
     {
         var pin = PinOf(end);
         var named = pin.StartsWith("GPIO", StringComparison.OrdinalIgnoreCase)
+            || System.Text.RegularExpressions.Regex.IsMatch(pin, @"^(IO|D)\d+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)
             || (pwm && pin.Contains("PWM", StringComparison.OrdinalIgnoreCase));
         if (!named)
         {
@@ -206,7 +208,7 @@ public sealed class SketchBoard
         }
 
         var part = Owner(end);
-        return part is not null && TypeHas(part, "mcu", "esp32", "ecu");
+        return part is not null && IsController(part);
     }
 
     private static bool IsModulePower(string pin) =>
@@ -240,6 +242,49 @@ public sealed class SketchBoard
         || pin.Equals("DAT", StringComparison.OrdinalIgnoreCase)
         || pin.Equals("DOUT", StringComparison.OrdinalIgnoreCase)
         || pin.StartsWith("GPIO", StringComparison.OrdinalIgnoreCase);
+
+    private static List<SketchWire> SplitBare(SchematicSketch sketch)
+    {
+        var wires = sketch.Wires.Select(wire => new SketchWire(wire.From.Trim(), wire.To.Trim())).ToList();
+        foreach (var part in sketch.Parts)
+        {
+            if (IsController(part) || SketchPartKinds.Of(part) is SketchPartKind.Supply or SketchPartKind.Ground)
+            {
+                continue;
+            }
+
+            var hits = new List<int>();
+            for (var index = 0; index < wires.Count; index++)
+            {
+                if (wires[index].From.Equals(part.Id, StringComparison.OrdinalIgnoreCase) || wires[index].To.Equals(part.Id, StringComparison.OrdinalIgnoreCase))
+                {
+                    hits.Add(index);
+                }
+            }
+
+            if (hits.Count < 2)
+            {
+                continue;
+            }
+
+            for (var slot = 0; slot < hits.Count; slot++)
+            {
+                var wire = wires[hits[slot]];
+                var lead = part.Id + "." + (char)('a' + slot);
+                wires[hits[slot]] = new SketchWire(
+                    wire.From.Equals(part.Id, StringComparison.OrdinalIgnoreCase) ? lead : wire.From,
+                    wire.To.Equals(part.Id, StringComparison.OrdinalIgnoreCase) ? lead : wire.To);
+            }
+        }
+
+        return wires;
+    }
+
+    private static bool NameHas(SketchPart? part, params string[] words)
+    {
+        var text = $"{part?.Type} {part?.Name}";
+        return words.Any(word => text.Contains(word, StringComparison.OrdinalIgnoreCase));
+    }
 
     private static bool IsNamed(string end, params string[] names)
     {
@@ -275,7 +320,7 @@ public sealed class SketchBoard
             return parent[key] = root;
         }
 
-        foreach (var wire in sketch.Wires)
+        foreach (var wire in SplitBare(sketch))
         {
             var left = Find(wire.From.Trim());
             var right = Find(wire.To.Trim());

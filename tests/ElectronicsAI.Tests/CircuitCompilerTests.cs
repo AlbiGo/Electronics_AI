@@ -27,6 +27,100 @@ public class CircuitCompilerTests
     }
 
     [Fact]
+    public void Esp32_push_button_led_is_checked_without_ngspice()
+    {
+        const string reply = """
+            {"parts":[{"id":"u1","name":"ESP32","type":"block"},{"id":"sw1","name":"SW1","type":"block","note":"Push Button"},{"id":"r1","name":"R1","type":"block","note":"330 ohm"},{"id":"r2","name":"R2","type":"block","note":"10k ohm"},{"id":"d1","name":"D1","type":"block","note":"LED"}],"wires":[{"from":"u1.3V3","to":"3V3"},{"from":"u1.GND","to":"GND"},{"from":"u1.GPIO19","to":"r1"},{"from":"r1","to":"d1"},{"from":"d1","to":"GND"},{"from":"u1.GPIO18","to":"sw1"},{"from":"sw1","to":"GND"},{"from":"u1.GPIO18","to":"r2"},{"from":"r2","to":"3V3"}]}
+            """;
+
+        var sketch = SketchReplyParser.Parse(reply, "ESP32 push button LED");
+        var match = new SketchRuleCatalog(SketchRules.All).Match(sketch, null);
+        var result = match!.Evaluate(sketch, null);
+
+        Assert.Equal(CircuitCategory.Embedded, match.Category);
+        Assert.False(result.Simulate);
+        Assert.All(result.Rules, rule => Assert.Equal("Pass", rule.Result));
+        var layout = SchematicRouter.Place(sketch);
+        Assert.False(SharesTrack(layout, "signal", "ground"));
+        var pull = layout.Parts.Single(part => part.Id.Equals("r2", StringComparison.OrdinalIgnoreCase));
+        var pullPins = pull.Pins.GroupBy(pin => pin.Name, StringComparer.OrdinalIgnoreCase).Select(group => group.First()).ToList();
+        var supply = layout.Wires.Single(wire => wire.Role == "power" && (wire.From.StartsWith("r2.", StringComparison.OrdinalIgnoreCase) || wire.To.StartsWith("r2.", StringComparison.OrdinalIgnoreCase) || wire.From.Equals("r2", StringComparison.OrdinalIgnoreCase) || wire.To.Equals("r2", StringComparison.OrdinalIgnoreCase)));
+        var supplyEnd = supply.Points[0];
+        Assert.Contains(pullPins, pin => Math.Abs(pin.X - supplyEnd.X) < 1 && Math.Abs(pin.Y - supplyEnd.Y) < 1);
+        Assert.Contains(pullPins, pin => Math.Abs(pin.X - supplyEnd.X) > 1 || Math.Abs(pin.Y - supplyEnd.Y) > 1);
+        Assert.True(supply.Points.Min(point => point.Y) < pull.Y - pull.Height / 2);
+        var led = layout.Parts.Single(part => part.Id.Equals("d1", StringComparison.OrdinalIgnoreCase));
+        var cathode = led.Pins.First(pin => pin.Name.Equals("Cathode", StringComparison.OrdinalIgnoreCase));
+        var ledGround = layout.Wires.Single(wire => wire.Role == "ground" && (wire.From.StartsWith("d1", StringComparison.OrdinalIgnoreCase) || wire.To.StartsWith("d1", StringComparison.OrdinalIgnoreCase)));
+        Assert.True(Math.Abs(ledGround.Points[0].X - cathode.X) < 1 && Math.Abs(ledGround.Points[0].Y - cathode.Y) < 1);
+    }
+
+    [Fact]
+    public void Esp32_lowercase_ground_token_still_routes()
+    {
+        const string reply = """
+            {"parts":[{"id":"esp32","name":"ESP32","type":"ESP32 DevKit","pins":["3V3","GND","GPIO18","GPIO19"]},{"id":"button1","type":"push button","pins":["1","2"]},{"id":"r1","type":"resistor","value":"10k ohm","pins":["1","2"]},{"id":"led1","type":"LED","pins":["Anode","Cathode"]},{"id":"r2","type":"resistor","value":"330 ohm","pins":["1","2"]}],"wires":[{"from":"esp32.GPIO18","to":"button1.1"},{"from":"button1.2","to":"gnd"},{"from":"esp32.GPIO18","to":"r1.1"},{"from":"r1.2","to":"3V3"},{"from":"esp32.GPIO19","to":"r2.1"},{"from":"r2.2","to":"led1.Anode"},{"from":"led1.Cathode","to":"gnd"},{"from":"esp32.3V3","to":"3V3"},{"from":"esp32.GND","to":"gnd"},{"from":"3V3","to":"gnd"}]}
+            """;
+
+        var sketch = SketchReplyParser.Parse(reply, "Create an ESP32 connected to a push button and LED");
+        var layout = SchematicRouter.Place(sketch);
+        Assert.NotEmpty(layout.Wires);
+    }
+
+    [Fact]
+    public void Esp32_pull_down_on_the_controller_pins_passes()
+    {
+        const string reply = """
+            {"parts":[{"id":"esp32","name":"ESP32","type":"block"},{"id":"button1","name":"SW1","type":"block","note":"Push Button"},{"id":"r1","name":"Rpull","type":"block","note":"10k ohm"},{"id":"r2","name":"Rseries","type":"block","note":"330 ohm"},{"id":"led1","name":"LED1","type":"block","note":"LED"}],"wires":[{"from":"esp32.GPIO18","to":"button1"},{"from":"button1","to":"esp32.3V3"},{"from":"esp32.GPIO18","to":"r1"},{"from":"r1","to":"esp32.GND"},{"from":"esp32.GPIO19","to":"r2"},{"from":"r2","to":"led1"},{"from":"led1","to":"esp32.GND"}]}
+            """;
+
+        var sketch = SketchReplyParser.Parse(reply, "Create an ESP32 connected to a push button and LED");
+        var match = new SketchRuleCatalog(SketchRules.All).Match(sketch, null);
+        var result = match!.Evaluate(sketch, null);
+
+        Assert.Equal(CircuitCategory.Embedded, match.Category);
+        Assert.All(result.Rules, rule => Assert.True(rule.Result == "Pass", $"{rule.Name}: {rule.Detail}"));
+        Assert.False(SharesTrack(SchematicRouter.Place(sketch), "signal", "ground"));
+        Assert.False(SharesTrack(SchematicRouter.Place(sketch), "power", "ground"));
+        var y = SchematicRouter.Place(sketch).Parts.ToDictionary(part => part.Id, part => part.Y, StringComparer.OrdinalIgnoreCase);
+        Assert.NotEqual(y["button1"], y["r1"]);
+        Assert.NotEqual(y["r1"], y["r2"]);
+    }
+
+    [Fact]
+    public void Esp32_button_pull_down_and_series_led_are_separate_branches()
+    {
+        const string reply = """
+            {"parts":[{"id":"esp32","name":"ESP32","type":"block"},{"id":"button1","name":"SW1","type":"block","note":"Push Button"},{"id":"r1","name":"Rpull","type":"block","note":"10k ohm"},{"id":"r2","name":"Rseries","type":"block","note":"330 ohm"},{"id":"led1","name":"LED1","type":"block","note":"LED"},{"id":"rail3","name":"3V3","type":"block"}],"wires":[{"from":"esp32.3V3","to":"3V3"},{"from":"esp32.GND","to":"GND"},{"from":"esp32.GPIO18","to":"button1"},{"from":"button1","to":"3V3"},{"from":"esp32.GPIO18","to":"r1"},{"from":"r1","to":"GND"},{"from":"esp32.GPIO18","to":"r2"},{"from":"r2","to":"led1"},{"from":"led1","to":"GND"}]}
+            """;
+
+        var sketch = SketchReplyParser.Parse(reply, "Create an ESP32 connected to a push button and LED");
+        var result = new SketchRuleCatalog(SketchRules.All).Match(sketch, null)!.Evaluate(sketch, null);
+        Assert.All(result.Rules, rule => Assert.True(rule.Result == "Pass", $"{rule.Name}: {rule.Detail}"));
+        var layout = SchematicRouter.Place(sketch);
+        Assert.DoesNotContain(layout.Parts, part => part.Id.Equals("rail3", StringComparison.OrdinalIgnoreCase));
+        var y = layout.Parts.ToDictionary(part => part.Id, part => part.Y, StringComparer.OrdinalIgnoreCase);
+        Assert.NotEqual(y["button1"], y["r1"]);
+        Assert.NotEqual(y["r1"], y["r2"]);
+        Assert.Equal(y["r2"], y["led1"]);
+    }
+
+    [Fact]
+    public void Esp32_series_chain_does_not_pass_as_a_button_and_led()
+    {
+        const string reply = """
+            {"parts":[{"id":"esp32","name":"ESP32","type":"block","pins":["3V3","GND","GPIO5","GPIO18"]},{"id":"sw","name":"Push Button","type":"block","note":"Push Button","pins":["1","2"]},{"id":"led","name":"LED","type":"block","note":"LED","pins":["A","K"]},{"id":"r330","name":"Series Resistor","type":"block","note":"330 ohm","pins":["1","2"]},{"id":"r10","name":"Pull Resistor","type":"block","note":"10k ohm","pins":["1","2"]}],"wires":[{"from":"esp32.3V3","to":"3V3"},{"from":"esp32.GND","to":"GND"},{"from":"esp32.GPIO18","to":"sw.1"},{"from":"sw.2","to":"led.A"},{"from":"sw.2","to":"GND"},{"from":"led.K","to":"GND"},{"from":"led.K","to":"r330.1"},{"from":"r330.2","to":"r10.1"},{"from":"r10.2","to":"3V3"},{"from":"esp32.GPIO5","to":"r330.1"}]}
+            """;
+
+        var sketch = SketchReplyParser.Parse(reply, "Create an ESP32 connected to a push button and LED");
+        var result = new SketchRuleCatalog(SketchRules.All).Match(sketch, null)!.Evaluate(sketch, null);
+
+        Assert.Contains(result.Rules, rule => rule.Name == "GPIO input detected" && rule.Result == "Fail");
+        Assert.Contains(result.Rules, rule => rule.Name == "GPIO output detected" && rule.Result == "Fail");
+        Assert.Contains(result.Rules, rule => rule.Name == "Pull resistor present" && rule.Result == "Fail");
+    }
+
+    [Fact]
     public void Pinless_push_button_led_is_in_series_from_5v_to_ground()
     {
         const string reply = """
@@ -37,6 +131,8 @@ public class CircuitCompilerTests
 
         Assert.True(result.Simulate);
         Assert.All(result.Rules, rule => Assert.Equal("Pass", rule.Result));
+        var layout = SchematicRouter.Place(SketchReplyParser.Parse(reply, "push button LED"));
+        Assert.Contains(layout.Wires, wire => wire.Role == "power" && (wire.From.Equals("+5V", StringComparison.OrdinalIgnoreCase) || wire.To.Equals("+5V", StringComparison.OrdinalIgnoreCase)));
     }
 
     [Fact]
@@ -281,6 +377,17 @@ public class CircuitCompilerTests
         Assert.Contains("Top resistor = 20 kΩ", assumptions);
         Assert.Contains("Bottom resistor = 10 kΩ", assumptions);
         Assert.Contains("Expected Vout = 1.67 V", assumptions);
+        var layout = SchematicRouter.Place(sketch);
+        var placed = layout.Parts.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(placed["v1"].X, placed["r1"].X);
+        Assert.Equal(placed["r1"].X, placed["vout"].X);
+        Assert.Equal(placed["vout"].X, placed["r2"].X);
+        Assert.Equal(placed["r2"].X, placed["gnd"].X);
+        Assert.True(placed["v1"].Y < placed["r1"].Y && placed["r1"].Y < placed["vout"].Y && placed["vout"].Y < placed["r2"].Y && placed["r2"].Y < placed["gnd"].Y);
+        foreach (var wire in layout.Wires.Where(item => !Touches(item, "v1") || !Touches(item, "gnd")))
+        {
+            Assert.All(wire.Points, point => Assert.Equal(placed["r1"].X, point.X));
+        }
     }
 
     [Fact]
@@ -354,6 +461,113 @@ public class CircuitCompilerTests
         Assert.NotNull(rule);
         Assert.Equal("Fail", rule.Result);
         Assert.Equal("Vout says 3.33 V. The output is 1.67 V.", rule.Detail);
+    }
+
+    [Fact]
+    public void Low_side_led_driver_is_not_scored_as_a_gpio_led()
+    {
+        const string reply = """
+            {"title":"Low-side LED","parts":[{"id":"u1","name":"ESP32","type":"mcu","pins":["3V3","GND","GPIO18"]},{"id":"rled","name":"Series resistor","type":"resistor","note":"330 ohm"},{"id":"d1","name":"LED","type":"led","pins":["Anode","Cathode"]},{"id":"q1","name":"N-MOSFET","type":"mosfet","pins":["Gate","Drain","Source"]},{"id":"rg","name":"Gate resistor","type":"resistor","note":"100 ohm"}],"wires":[{"from":"u1.3V3","to":"rled.1"},{"from":"rled.2","to":"d1.Anode"},{"from":"d1.Cathode","to":"q1.Drain"},{"from":"q1.Source","to":"GND"},{"from":"u1.GND","to":"GND"},{"from":"u1.GPIO18","to":"rg.1"},{"from":"rg.2","to":"q1.Gate"}]}
+            """;
+
+        var sketch = SketchReplyParser.Parse(reply, "low-side LED driver");
+        var match = new SketchRuleCatalog(SketchRules.All).Match(sketch, null)!;
+        var result = match.Evaluate(sketch, null);
+
+        Assert.Equal(CircuitCategory.LowSideLed, CircuitCategories.Of(sketch));
+        Assert.Equal(CircuitCategory.LowSideLed, match.Category);
+        Assert.DoesNotContain(result.Rules, rule => rule.Name == "GPIO output detected");
+        Assert.All(result.Rules, rule => Assert.True(rule.Result == "Pass", $"{rule.Name}: {rule.Detail}"));
+    }
+
+    [Fact]
+    public void Controller_and_unnamed_mosfet_leads_stay_a_low_side_led_driver()
+    {
+        const string reply = """
+            {"title":"Low-side LED driver","parts":[{"id":"u1","name":"controller","type":"controller"},{"id":"q1","name":"Q1","type":"n-mosfet"},{"id":"d1","name":"LED","type":"led"},{"id":"r1","name":"Rseries","type":"resistor","note":"330 ohm"},{"id":"r2","name":"Gate Resistor","type":"resistor","note":"100 ohm"}],"wires":[{"from":"u1.3V3","to":"r1.1"},{"from":"r1.2","to":"d1.A"},{"from":"d1.K","to":"q1"},{"from":"q1","to":"GND"},{"from":"u1.GPIO","to":"r2.1"},{"from":"r2.2","to":"q1"},{"from":"u1.GND","to":"GND"}]}
+            """;
+
+        var sketch = SketchReplyParser.Parse(reply, "low-side LED driver");
+        var match = new SketchRuleCatalog(SketchRules.All).Match(sketch, null)!;
+
+        Assert.Equal(CircuitCategory.LowSideLed, match.Category);
+        Assert.False(LogicFamily.Matches(sketch));
+        Assert.All(match.Evaluate(sketch, null).Rules, rule => Assert.True(rule.Result == "Pass", $"{rule.Name}: {rule.Detail}"));
+    }
+
+    [Fact]
+    public void Low_side_driver_accepts_an_unnamed_gpio_a_voltage_source_and_a_separate_ground()
+    {
+        const string reply = """
+            {"title":"Low-side LED driver (gpio-transistor)","parts":[{"id":"u1","name":"ESP32","type":"controller"},{"id":"r1","name":"Rseries","type":"resistor","note":"330 ohm"},{"id":"d1","name":"LED","type":"led"},{"id":"q1","name":"Q1","type":"n-mosfet"},{"id":"r2","name":"Rgate","type":"resistor","note":"gate resistor"},{"id":"v1","name":"3.3V","type":"voltage","note":"3.3V"},{"id":"gnd","name":"GND","type":"ground"}],"wires":[{"from":"v1","to":"r1"},{"from":"r1","to":"d1.anode"},{"from":"d1.cathode","to":"q1.drain"},{"from":"q1.source","to":"GND"},{"from":"u1","to":"r2"},{"from":"r2","to":"q1.gate"},{"from":"u1.GND","to":"gnd"},{"from":"u1.3.3V","to":"v1"}]}
+            """;
+
+        var rules = LowSideLedFamily.Pattern.Evaluate(SketchReplyParser.Parse(reply, "low-side LED driver"), null).Rules;
+
+        Assert.All(rules, rule => Assert.True(rule.Result == "Pass", $"{rule.Name}: {rule.Detail}"));
+    }
+
+    [Fact]
+    public void Low_side_driver_accepts_an_out_pin_and_a_five_volt_rail()
+    {
+        const string reply = """
+            {"title":"Low-side LED driver","parts":[{"id":"u1","name":"Controller","type":"controller"},{"id":"q1","name":"Q1","type":"n-mosfet"},{"id":"d1","name":"LED1","type":"led"},{"id":"r1","name":"Rseries","type":"resistor","note":"330 ohm"},{"id":"r2","name":"Rgate","type":"resistor","note":"100 ohm"}],"wires":[{"from":"+5V","to":"r1"},{"from":"r1","to":"d1"},{"from":"d1","to":"q1.D"},{"from":"q1.S","to":"GND"},{"from":"u1.OUT","to":"r2"},{"from":"r2","to":"q1.G"},{"from":"u1.VSS","to":"GND"}]}
+            """;
+
+        var rules = LowSideLedFamily.Pattern.Evaluate(SketchReplyParser.Parse(reply, "low-side LED driver"), null).Rules;
+
+        Assert.All(rules, rule => Assert.True(rule.Result == "Pass", $"{rule.Name}: {rule.Detail}"));
+    }
+
+    [Fact]
+    public void Low_side_led_keeps_the_load_on_the_center_line_and_the_gate_trace_on_the_left()
+    {
+        const string reply = """
+            {"title":"Low-side LED driver","parts":[{"id":"q1","name":"Q1","type":"n-mosfet"},{"id":"d1","name":"LED","type":"led"},{"id":"r2","name":"Rgate","type":"resistor","note":"gate resistor"},{"id":"u1","name":"ESP32","type":"controller"},{"id":"r1","name":"Rseries","type":"resistor","note":"330 ohm"},{"id":"gnd","name":"GND","type":"ground"}],"wires":[{"from":"u1.3V3","to":"r1"},{"from":"r1","to":"d1.anode"},{"from":"d1.cathode","to":"q1.drain"},{"from":"q1.source","to":"gnd"},{"from":"u1.GPIO","to":"r2"},{"from":"r2","to":"q1.gate"},{"from":"u1.GND","to":"gnd"}]}
+            """;
+
+        var layout = SchematicRouter.Place(SketchReplyParser.Parse(reply, "low-side LED driver"));
+        var part = layout.Parts.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
+
+        Assert.Equal(part["r1"].X, part["d1"].X);
+        Assert.Equal(part["d1"].X, part["q1"].X);
+        Assert.Equal(part["q1"].X, part["gnd"].X);
+        Assert.True(part["r1"].X - part["r1"].Width / 2 - (part["u1"].X + part["u1"].Width / 2) >= 140);
+        Assert.True(part["r1"].Y < part["d1"].Y && part["d1"].Y < part["q1"].Y && part["q1"].Y < part["gnd"].Y);
+        Assert.True(part["r2"].X < part["q1"].X - part["q1"].Width / 2);
+        Assert.True(part["u1"].Y < part["r2"].Y);
+        Assert.Equal("left", part["q1"].Pins.Single(pin => pin.Name == "Gate").Side);
+        Assert.Equal("bottom", part["u1"].Pins.Single(pin => pin.Name.Equals("GPIO", StringComparison.OrdinalIgnoreCase)).Side);
+        Assert.Equal(part["q1"].X, part["q1"].Pins.Single(pin => pin.Name == "Drain").X);
+        Assert.Equal(part["q1"].X, part["q1"].Pins.Single(pin => pin.Name == "Source").X);
+
+        foreach (var wire in layout.Wires.Where(item => Touches(item, "r2") || Touches(item, "u1")))
+        {
+            Assert.False(Crosses(wire, part["d1"]));
+            Assert.False(Crosses(wire, part["r1"]));
+            Assert.False(Crosses(wire, part["q1"]));
+        }
+
+        foreach (var wire in layout.Wires.Where(item => (Touches(item, "d1") && Touches(item, "q1")) || (Touches(item, "q1") && Touches(item, "gnd")) || (Touches(item, "r1") && Touches(item, "d1"))))
+        {
+            Assert.All(wire.Points, point => Assert.Equal(part["r1"].X, point.X));
+        }
+    }
+
+    [Fact]
+    public void Led_wired_to_a_gpio_fails_the_low_side_family()
+    {
+        const string reply = """
+            {"parts":[{"id":"u1","name":"ESP32","type":"mcu","pins":["3V3","GND","GPIO18"]},{"id":"r1","name":"R1","type":"resistor","note":"330 ohm"},{"id":"d1","name":"LED","type":"led"},{"id":"q1","name":"N-MOSFET","type":"mosfet","pins":["Gate","Drain","Source"]}],"wires":[{"from":"u1.GPIO18","to":"r1.1"},{"from":"r1.2","to":"d1.Anode"},{"from":"d1.Cathode","to":"GND"},{"from":"u1.GND","to":"GND"},{"from":"u1.3V3","to":"3V3"}]}
+            """;
+
+        var sketch = SketchReplyParser.Parse(reply, "ESP32 LED");
+        var rules = LowSideLedFamily.Pattern.Evaluate(sketch, null).Rules;
+
+        Assert.Equal(CircuitCategory.LowSideLed, new SketchRuleCatalog(SketchRules.All).Match(sketch, null)!.Category);
+        Assert.Equal("Fail", rules.Single(rule => rule.Name == "Gate drive").Result);
+        Assert.Equal("Fail", rules.Single(rule => rule.Name == "LED off the GPIO").Result);
+        Assert.Contains("gate", rules.Single(rule => rule.Name == "LED off the GPIO").Detail, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -445,9 +659,71 @@ public class CircuitCompilerTests
         Assert.Equal("Pass", rules.Single(rule => rule.Name == "Switch connected").Result);
         Assert.Equal("Pass", rules.Single(rule => rule.Name == "Solenoid connected through driver").Result);
         Assert.Equal("Fail", rules.Single(rule => rule.Name == "Flyback diode present").Result);
+        Assert.Contains("flyback diode", rules.Single(rule => rule.Name == "Flyback diode present").Detail, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("Fail", rules.Single(rule => rule.Name == "Common ground present").Result);
+        var layout = SchematicRouter.Place(sketch);
+        var ecu = layout.Parts.Single(part => part.Id == "ecu1");
+        var solenoid = layout.Parts.Single(part => part.Id == "sol1");
+        var diode = layout.Parts.Single(part => part.Id == "d1");
+        Assert.True(solenoid.X > ecu.X);
+        Assert.True(diode.X > solenoid.X);
+        Assert.True(diode.Y < solenoid.Y);
+        Assert.Equal(140, ecu.Width);
+        Assert.Equal(180, ecu.Height);
         Assert.Equal("Pass", rules.Single(rule => rule.Name == "Solenoid not driven directly from ECU pin").Result);
         Assert.Equal("Pass", rules.Single(rule => rule.Name == "External supply provided").Result);
+    }
+
+    [Fact]
+    public void Pinless_ecu_solenoid_wiring_passes()
+    {
+        const string reply = """
+            {"parts":[{"id":"ecu1","name":"ECU","type":"block","pins":["TempIn","SwitchIn","SolenoidOut","GND"]},{"id":"temp1","name":"Temperature sensor","type":"block"},{"id":"sw1","name":"Switch","type":"block"},{"id":"sol1","name":"Solenoid","type":"block","pins":["1","2"]},{"id":"q1","name":"N-MOSFET","type":"block","pins":["Gate","Drain","Source"]},{"id":"rg","name":"Gate resistor","type":"resistor","note":"100 ohm","pins":["1","2"]},{"id":"d1","name":"Flyback diode","type":"diode","pins":["Anode","Cathode"]}],"wires":[{"from":"temp1","to":"ecu1.TempIn"},{"from":"temp1","to":"GND"},{"from":"temp1","to":"5V"},{"from":"sw1","to":"ecu1.SwitchIn"},{"from":"sw1","to":"GND"},{"from":"ecu1.SolenoidOut","to":"rg.1"},{"from":"rg.2","to":"q1.Gate"},{"from":"q1.Drain","to":"sol1.2"},{"from":"sol1.1","to":"12V"},{"from":"q1.Source","to":"GND"},{"from":"ecu1.GND","to":"GND"},{"from":"d1.Cathode","to":"12V"},{"from":"d1.Anode","to":"q1.Drain"}]}
+            """;
+
+        var rules = SolenoidFamily.Pattern.Evaluate(SketchReplyParser.Parse(reply, "ECU temperature sensor switch solenoid"), null).Rules;
+
+        Assert.All(rules, rule => Assert.True(rule.Result == "Pass", $"{rule.Name}: {rule.Detail}"));
+    }
+
+    [Fact]
+    public void Swapped_mosfet_series_diode_and_bypassed_gate_resistor_fail()
+    {
+        const string reply = """
+            {"parts":[{"id":"ecu1","name":"ECU","type":"ecu","pins":["TempIn","SwitchIn","SolenoidOut","GND"]},{"id":"temp1","name":"Temperature sensor","type":"temperature_sensor"},{"id":"sw1","name":"Switch","type":"switch"},{"id":"sol1","name":"Solenoid","type":"solenoid","pins":["POS","NEG"]},{"id":"q1","name":"N-MOSFET","type":"mosfet","pins":["Gate","Drain","Source"]},{"id":"rg","name":"Gate resistor","type":"resistor","note":"100 ohm","pins":["1","2"]},{"id":"d1","name":"Flyback","type":"diode","pins":["Anode","Cathode"]}],"wires":[{"from":"temp1.OUT","to":"ecu1.TempIn"},{"from":"sw1.1","to":"ecu1.SwitchIn"},{"from":"ecu1.SolenoidOut","to":"rg.1"},{"from":"rg.1","to":"rg.2"},{"from":"rg.2","to":"d1.Anode"},{"from":"d1.Cathode","to":"q1.Drain"},{"from":"q1.Gate","to":"sol1.NEG"},{"from":"sol1.POS","to":"12V"},{"from":"q1.Source","to":"GND"},{"from":"ecu1.GND","to":"GND"}]}
+            """;
+
+        var rules = SolenoidFamily.Pattern.Evaluate(SketchReplyParser.Parse(reply, "ECU solenoid"), null).Rules;
+
+        Assert.Equal("Fail", rules.Single(rule => rule.Name == "MOSFET terminals").Result);
+        Assert.Contains("swapped", rules.Single(rule => rule.Name == "MOSFET terminals").Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Fail", rules.Single(rule => rule.Name == "Gate resistor").Result);
+        Assert.Contains("bypassed", rules.Single(rule => rule.Name == "Gate resistor").Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Fail", rules.Single(rule => rule.Name == "Flyback diode present").Result);
+        Assert.Contains("series", rules.Single(rule => rule.Name == "Flyback diode present").Detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Ecu_temperature_switch_and_solenoid_is_not_scored_as_a_motor()
+    {
+        const string reply = """
+            {"parts":[{"id":"ecu1","name":"ECU","type":"block"},{"id":"temp1","name":"Temperature sensor","type":"block"},{"id":"sw1","name":"Switch","type":"block"},{"id":"sol1","name":"Solenoid","type":"block"},{"id":"q1","name":"N-MOSFET","type":"mosfet"},{"id":"d1","name":"Flyback","type":"diode"}],"wires":[{"from":"temp1.Output","to":"ecu1.TempIn"},{"from":"sw1.1","to":"ecu1.SwitchIn"},{"from":"ecu1.SolenoidOut","to":"q1.Gate"},{"from":"q1.Drain","to":"sol1.1"},{"from":"sol1.2","to":"+12V"},{"from":"q1.Source","to":"GND"},{"from":"ecu1.GND","to":"GND"},{"from":"d1.K","to":"+12V"},{"from":"d1.A","to":"q1.Drain"}]}
+            """;
+
+        var sketch = SketchReplyParser.Parse(reply, "ECU with a temperature sensor, a switch, and a solenoid");
+        var match = new SketchRuleCatalog(SketchRules.All).Match(sketch, "ECU with a temperature sensor, a switch, and a solenoid");
+        var rules = match!.Evaluate(sketch, null).Rules;
+
+        Assert.Equal(CircuitCategory.Solenoid, match.Category);
+        Assert.DoesNotContain(rules, rule => rule.Detail.Contains("across the motor", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(rules, rule => rule.Detail.Contains("PWM pin", StringComparison.OrdinalIgnoreCase));
+        var layout = SchematicRouter.Place(sketch);
+        var ecu = layout.Parts.Single(part => part.Id == "ecu1");
+        var sensor = layout.Parts.Single(part => part.Id == "temp1");
+        var toggle = layout.Parts.Single(part => part.Id == "sw1");
+        var solenoid = layout.Parts.Single(part => part.Id == "sol1");
+        Assert.True(sensor.X > ecu.X && toggle.X > ecu.X && solenoid.X > ecu.X);
+        Assert.True(sensor.Y < toggle.Y && toggle.Y < solenoid.Y);
     }
 
     [Fact]
@@ -550,6 +826,146 @@ public class CircuitCompilerTests
 
         var error = Assert.Throws<CircuitCompileException>(() => new CircuitEngine(compiler).Compile(SketchReplyParser.Parse(reply, "Push Button + LED")));
 
-        Assert.Equal("Resistor r1 has no resistance.", error.Message);
+        Assert.Equal("Resistor r1 has no resistance. Put the ohms in its note, such as 330 ohm.", error.Message);
+    }
+
+    [Fact]
+    public void Led_resistor_and_battery_keep_the_led_when_its_note_mentions_the_resistor()
+    {
+        const string reply = """
+            {"title":"LED + Resistor + Battery","parts":[{"id":"d1","name":"LED","type":"led","note":"series resistor"},{"id":"r1","name":"R1","type":"resistor","note":"330 ohm"},{"id":"b1","name":"Battery","type":"battery","note":"9V"}],"wires":[{"from":"b1","to":"r1"},{"from":"r1","to":"d1"},{"from":"d1","to":"GND"},{"from":"b1","to":"GND"}]}
+            """;
+
+        var circuit = new CircuitEngine(compiler).Compile(SketchReplyParser.Parse(reply, "LED + Resistor + Battery"));
+
+        Assert.Contains(circuit.Components.OfType<Led>(), led => led.Id == "d1");
+        Assert.Contains(circuit.Components.OfType<Resistor>(), resistor => resistor.Id == "r1" && resistor.Ohms == 330);
+        Assert.Equal(9, circuit.Components.OfType<VoltageSource>().Single().Volts);
+    }
+
+    [Fact]
+    public void Low_side_led_driver_offers_three_choices_until_one_is_chosen()
+    {
+        const string series = """
+            {"title":"Low-Side Controlled LED Driver Loop","parts":[{"id":"d1","name":"LED","type":"led"},{"id":"r1","name":"R1","type":"resistor","note":"330 ohm"},{"id":"sw","name":"Push Button","type":"switch"}],"wires":[]}
+            """;
+        const string transistor = """
+            {"parts":[{"id":"d1","name":"LED","type":"led"},{"id":"q1","name":"N-MOSFET","type":"mosfet"},{"id":"u1","name":"ESP32","type":"mcu"}],"wires":[]}
+            """;
+        const string plain = """
+            {"parts":[{"id":"d1","name":"LED","type":"led"},{"id":"r1","name":"R1","type":"resistor","note":"330 ohm"}],"wires":[]}
+            """;
+
+        var asked = LedDriverChoices.Find(SketchReplyParser.Parse(series, "Low-Side Controlled LED Driver Loop"), "Low-Side Controlled LED Driver Loop");
+        Assert.Equal(["series-switch", "gpio-transistor", "transistor-only"], asked!.Select(choice => choice.Id));
+
+        var withTransistor = LedDriverChoices.Find(SketchReplyParser.Parse(transistor, "blink an LED"), "blink an LED");
+        Assert.Equal(3, withTransistor!.Count);
+
+        Assert.Null(LedDriverChoices.Find(SketchReplyParser.Parse(plain, "LED + Resistor + Battery"), "LED + Resistor + Battery"));
+        Assert.Null(LedDriverChoices.Find(
+            SketchReplyParser.Parse(series, "Low-Side Controlled LED Driver Loop"),
+            "Low-Side Controlled LED Driver Loop\n\nChosen LED driver: series-switch."));
+    }
+
+    [Fact]
+    public void Led_switch_and_battery_stack_on_one_vertical_axis()
+    {
+        const string reply = """
+            {"title":"LED + Resistor + Switch + Battery","parts":[{"id":"b1","name":"Battery","type":"battery","note":"9V"},{"id":"r1","name":"R1","type":"resistor","note":"330 ohm"},{"id":"sw1","name":"Push Button","type":"switch","note":"SPST"},{"id":"d1","name":"LED","type":"led"},{"id":"gnd1","name":"GND","type":"ground"}],"wires":[{"from":"b1","to":"r1"},{"from":"r1","to":"sw1"},{"from":"sw1","to":"d1"},{"from":"d1","to":"gnd1"},{"from":"b1","to":"gnd1"}]}
+            """;
+
+        var layout = SchematicRouter.Place(SketchReplyParser.Parse(reply, "LED resistor switch battery"));
+        var part = layout.Parts.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
+
+        Assert.Equal(part["b1"].X, part["r1"].X);
+        Assert.Equal(part["r1"].X, part["sw1"].X);
+        Assert.Equal(part["sw1"].X, part["d1"].X);
+        Assert.Equal(part["d1"].X, part["gnd1"].X);
+        Assert.True(part["b1"].Y < part["r1"].Y && part["r1"].Y < part["sw1"].Y && part["sw1"].Y < part["d1"].Y && part["d1"].Y < part["gnd1"].Y);
+        Assert.True(part["sw1"].Upright);
+        Assert.True(part["b1"].Upright == false && part["gnd1"].Upright == false);
+
+        foreach (var wire in layout.Wires.Where(item => !Touches(item, "b1") || !Touches(item, "gnd1")))
+        {
+            Assert.True(wire.Points.Count >= 2);
+            Assert.All(wire.Points, point => Assert.Equal(part["r1"].X, point.X));
+        }
+    }
+
+    private static bool Crosses(LayoutWire wire, LayoutPart part)
+    {
+        var left = part.X - part.Width / 2;
+        var right = part.X + part.Width / 2;
+        var top = part.Y - part.Height / 2;
+        var bottom = part.Y + part.Height / 2;
+        for (var index = 1; index < wire.Points.Count; index++)
+        {
+            var from = wire.Points[index - 1];
+            var to = wire.Points[index];
+            var steps = (int)(Math.Max(Math.Abs(to.X - from.X), Math.Abs(to.Y - from.Y)) / 4) + 1;
+            for (var step = 0; step <= steps; step++)
+            {
+                var x = from.X + (to.X - from.X) * step / steps;
+                var y = from.Y + (to.Y - from.Y) * step / steps;
+                if (x > left + 1 && x < right - 1 && y > top + 1 && y < bottom - 1)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool Touches(LayoutWire wire, string id) =>
+        wire.From.Equals(id, StringComparison.OrdinalIgnoreCase)
+        || wire.To.Equals(id, StringComparison.OrdinalIgnoreCase)
+        || wire.From.StartsWith(id + ".", StringComparison.OrdinalIgnoreCase)
+        || wire.To.StartsWith(id + ".", StringComparison.OrdinalIgnoreCase);
+
+    private static bool SharesTrack(SchematicLayout layout, string leftRole, string rightRole)
+    {
+        var left = layout.Wires.Where(wire => wire.Role == leftRole).ToList();
+        var right = layout.Wires.Where(wire => wire.Role == rightRole).ToList();
+        foreach (var a in left)
+        {
+            foreach (var b in right)
+            {
+                for (var i = 1; i < a.Points.Count; i++)
+                {
+                    for (var j = 1; j < b.Points.Count; j++)
+                    {
+                        if (Collinear(a.Points[i - 1], a.Points[i], b.Points[j - 1], b.Points[j]))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool Collinear(LayoutPoint a1, LayoutPoint a2, LayoutPoint b1, LayoutPoint b2)
+    {
+        var aVertical = Math.Abs(a1.X - a2.X) < 1;
+        var bVertical = Math.Abs(b1.X - b2.X) < 1;
+        if (aVertical && bVertical && Math.Abs(a1.X - b1.X) < 1)
+        {
+            return RangesOverlap(a1.Y, a2.Y, b1.Y, b2.Y);
+        }
+
+        var aHorizontal = Math.Abs(a1.Y - a2.Y) < 1;
+        var bHorizontal = Math.Abs(b1.Y - b2.Y) < 1;
+        return aHorizontal && bHorizontal && Math.Abs(a1.Y - b1.Y) < 1 && RangesOverlap(a1.X, a2.X, b1.X, b2.X);
+    }
+
+    private static bool RangesOverlap(double a1, double a2, double b1, double b2)
+    {
+        var start = Math.Max(Math.Min(a1, a2), Math.Min(b1, b2));
+        var end = Math.Min(Math.Max(a1, a2), Math.Max(b1, b2));
+        return end - start > 1;
     }
 }

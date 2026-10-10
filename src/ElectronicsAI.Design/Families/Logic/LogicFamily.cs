@@ -22,11 +22,15 @@ public static class LogicFamily
     };
 
     public static bool Matches(SchematicSketch sketch) =>
-        sketch.Parts.Any(part => Is(part, "adder", "gate", "flip"));
+        sketch.Parts.Any(part =>
+        {
+            var text = $"{part.Type} {part.Name}";
+            if (text.Contains("adder", StringComparison.OrdinalIgnoreCase) || text.Contains("flip", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
 
-    private static bool Is(SketchPart part, params string[] words)
-    {
-        var text = $"{part.Type} {part.Name}";
-        return words.Any(word => text.Contains(word, StringComparison.OrdinalIgnoreCase));
-    }
+            return SketchPartKinds.Of(part) != SketchPartKind.Resistor
+                && text.Contains("gate", StringComparison.OrdinalIgnoreCase);
+        });
 }

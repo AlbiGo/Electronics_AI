@@ -30,9 +30,9 @@ public sealed partial class CircuitCompiler
             var kind = kinds[part.Id];
             if (kind == SketchPartKind.Resistor)
             {
-                if (!TryOhms(part.Note, out var ohms))
+                if (!TryOhms(part.Note, out var ohms) && !TryOhms(part.Name, out ohms, requireUnit: true))
                 {
-                    throw new CircuitCompileException($"Resistor {part.Id} has no resistance.");
+                    throw new CircuitCompileException($"Resistor {part.Id} has no resistance. Put the ohms in its note, such as 330 ohm.");
                 }
 
                 resistors.Add(new Resistor { Id = part.Id, Reference = Reference(part.Id, "R"), Ohms = ohms });
@@ -302,7 +302,7 @@ public sealed partial class CircuitCompiler
             }
 
             var id = Bare(end);
-            return Kind(other) == SketchPartKind.Ground ? id + ".negative" : id + ".positive";
+            return Kind(other) == SketchPartKind.Ground || IsGround(other.Trim()) ? id + ".negative" : id + ".positive";
         }
 
         foreach (var part in sketch.Parts)
@@ -400,7 +400,7 @@ public sealed partial class CircuitCompiler
         || label.Equals("VIN", StringComparison.OrdinalIgnoreCase)
         || TryVolts(label, out _);
 
-    private static bool TryOhms(string? text, out double ohms)
+    private static bool TryOhms(string? text, out double ohms, bool requireUnit = false)
     {
         ohms = 0;
         if (string.IsNullOrWhiteSpace(text))
@@ -409,7 +409,7 @@ public sealed partial class CircuitCompiler
         }
 
         var match = OhmsPattern().Match(text);
-        if (!match.Success || !double.TryParse(match.Groups["n"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
+        if (!match.Success || (requireUnit && match.Groups["u"].Length == 0) || !double.TryParse(match.Groups["n"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
         {
             return false;
         }

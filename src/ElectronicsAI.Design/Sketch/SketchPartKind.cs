@@ -16,7 +16,13 @@ public static class SketchPartKinds
 {
     public static SketchPartKind Of(SketchPart part)
     {
-        var type = $"{part.Type} {part.Name} {part.Note}";
+        var identity = $"{part.Type} {part.Name}";
+        var type = $"{identity} {part.Note}";
+        if (Has(identity, "led") && !Has(identity, "resistor") && !Has(identity, "ohm"))
+        {
+            return SketchPartKind.Led;
+        }
+
         if (Has(type, "resistor") || Has(type, "ohm"))
         {
             return SketchPartKind.Resistor;

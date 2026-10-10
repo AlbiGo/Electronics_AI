@@ -10,6 +10,8 @@ public enum CircuitCategory
     Logic,
     Buck,
     Solenoid,
+    LowSideLed,
+    Embedded,
 }
 
 public interface ISketchValidator
@@ -58,6 +60,11 @@ public static class CircuitCategories
             return CircuitCategory.Solenoid;
         }
 
+        if (LowSideLedFamily.Pattern.Applies(sketch, null))
+        {
+            return CircuitCategory.LowSideLed;
+        }
+
         if (MotorDriverRules.Applies(sketch))
         {
             return CircuitCategory.MotorDriver;
@@ -81,6 +88,11 @@ public static class CircuitCategories
         if (LogicFamily.Matches(sketch))
         {
             return CircuitCategory.Logic;
+        }
+
+        if (ControllerIoValidator.Applies(sketch))
+        {
+            return CircuitCategory.Embedded;
         }
 
         return CircuitCategory.Unknown;
