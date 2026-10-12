@@ -20,9 +20,8 @@ public sealed class SketchSpice(ICircuitCompiler compiler, SpiceNetlistWriter wr
 {
     public SketchSimulationView Simulate(SchematicSketch sketch, string? request = null)
     {
-        if (rules.Match(sketch, request) is { } ruleSet)
+        if (CircuitComposition.Compose(rules.Match(sketch, request), sketch, request) is { } outcome)
         {
-            var outcome = ruleSet.Evaluate(sketch, request);
             var validation = outcome.Rules.Select(rule => new SketchCheckView(rule.Name, rule.Detail, rule.Result)).ToList();
             if (outcome.Simulate)
             {

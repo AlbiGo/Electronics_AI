@@ -534,10 +534,11 @@ public class CircuitCompilerTests
         Assert.Equal(part["q1"].X, part["gnd"].X);
         Assert.True(part["r1"].X - part["r1"].Width / 2 - (part["u1"].X + part["u1"].Width / 2) >= 140);
         Assert.True(part["r1"].Y < part["d1"].Y && part["d1"].Y < part["q1"].Y && part["q1"].Y < part["gnd"].Y);
-        Assert.True(part["r2"].X < part["q1"].X - part["q1"].Width / 2);
-        Assert.True(part["u1"].Y < part["r2"].Y);
+        Assert.Equal(part["q1"].Y, part["u1"].Y);
+        Assert.Equal(part["q1"].Y, part["r2"].Y);
+        Assert.True(part["u1"].X < part["r2"].X && part["r2"].X < part["q1"].X);
         Assert.Equal("left", part["q1"].Pins.Single(pin => pin.Name == "Gate").Side);
-        Assert.Equal("bottom", part["u1"].Pins.Single(pin => pin.Name.Equals("GPIO", StringComparison.OrdinalIgnoreCase)).Side);
+        Assert.Equal("right", part["u1"].Pins.Single(pin => pin.Name.Equals("GPIO", StringComparison.OrdinalIgnoreCase)).Side);
         Assert.Equal(part["q1"].X, part["q1"].Pins.Single(pin => pin.Name == "Drain").X);
         Assert.Equal(part["q1"].X, part["q1"].Pins.Single(pin => pin.Name == "Source").X);
 
@@ -790,9 +791,17 @@ public class CircuitCompilerTests
             {"parts":[{"id":"ecu1","type":"ecu"},{"id":"temp1","type":"temperature_sensor"}],"wires":[{"from":"temp1.Output","to":"ecu1.TempIn"},{"from":"temp1.VCC","to":"5V"},{"from":"ecu1.VCC","to":"5V"},{"from":"temp1.GND","to":"GND"},{"from":"ecu1.GND","to":"GND"}]}
             """;
 
-        var rules = Esp32SensorFamily.Analog.Evaluate(SketchReplyParser.Parse(reply, "temperature sensor and ECU"), null).Rules;
+        var sketch = SketchReplyParser.Parse(reply, "temperature sensor and ECU");
+        var rules = Esp32SensorFamily.Analog.Evaluate(sketch, null).Rules;
 
         Assert.All(rules, rule => Assert.Equal("Pass", rule.Result));
+        var layout = SchematicRouter.Place(sketch);
+        var sensor = layout.Parts.Single(part => part.Id == "temp1");
+        var ecu = layout.Parts.Single(part => part.Id == "ecu1");
+        Assert.True(sensor.Y < ecu.Y);
+        Assert.Equal(sensor.X, ecu.X);
+        Assert.Equal("bottom", sensor.Pins.Single(pin => pin.Name.Equals("Output", StringComparison.OrdinalIgnoreCase)).Side);
+        Assert.Equal("top", ecu.Pins.Single(pin => pin.Name.Equals("TempIn", StringComparison.OrdinalIgnoreCase)).Side);
     }
 
     [Fact]
@@ -866,6 +875,49 @@ public class CircuitCompilerTests
         Assert.Null(LedDriverChoices.Find(
             SketchReplyParser.Parse(series, "Low-Side Controlled LED Driver Loop"),
             "Low-Side Controlled LED Driver Loop\n\nChosen LED driver: series-switch."));
+    }
+
+    [Fact]
+    public void A_sketch_keeps_every_role_it_contains()
+    {
+        const string wired = """
+            {"title":"Fan controller","parts":[{"id":"u1","name":"ESP32","type":"controller","pins":["3V3","GND","GPIO17","ADC"]},{"id":"temp1","name":"LM35","type":"temperature_sensor","pins":["VCC","GND","OUT"]},{"id":"q1","name":"Q1","type":"n-mosfet","pins":["Gate","Drain","Source"]},{"id":"fan1","name":"Fan","type":"fan"},{"id":"r1","name":"R1","type":"resistor","note":"100 ohm"},{"id":"d1","name":"Flyback","type":"diode"},{"id":"gnd","name":"GND","type":"ground"}],"wires":[{"from":"temp1.VCC","to":"5V"},{"from":"temp1.GND","to":"gnd"},{"from":"temp1.OUT","to":"u1.ADC"},{"from":"u1.3V3","to":"3V3"},{"from":"u1.GND","to":"gnd"},{"from":"u1.GPIO17","to":"r1.1"},{"from":"r1.2","to":"q1.Gate"},{"from":"+12V","to":"fan1.1"},{"from":"fan1.2","to":"q1.Drain"},{"from":"q1.Source","to":"gnd"},{"from":"d1.A","to":"q1.Drain"},{"from":"d1.K","to":"+12V"}]}
+            """;
+        const string onGpio = """
+            {"title":"Fan controller","parts":[{"id":"u1","name":"ESP32","type":"controller","pins":["3V3","GND","GPIO17","ADC"]},{"id":"temp1","name":"LM35","type":"temperature_sensor","pins":["VCC","GND","OUT"]},{"id":"q1","name":"Q1","type":"n-mosfet","pins":["Gate","Drain","Source"]},{"id":"fan1","name":"Fan","type":"fan"},{"id":"r1","name":"R1","type":"resistor","note":"100 ohm"},{"id":"gnd","name":"GND","type":"ground"}],"wires":[{"from":"temp1.VCC","to":"5V"},{"from":"temp1.GND","to":"gnd"},{"from":"temp1.OUT","to":"u1.ADC"},{"from":"u1.3V3","to":"3V3"},{"from":"u1.GND","to":"gnd"},{"from":"u1.GPIO17","to":"fan1.1"},{"from":"fan1.2","to":"gnd"},{"from":"q1.Source","to":"gnd"}]}
+            """;
+        const string motorOnly = """
+            {"title":"ESP32 low-side motor driver","parts":[{"id":"u1","name":"ESP32","type":"mcu"},{"id":"q1","name":"N-MOSFET","type":"mosfet"},{"id":"m1","name":"Motor","type":"motor"},{"id":"d1","name":"Flyback","type":"diode"},{"id":"rg","name":"Gate resistor","type":"resistor","note":"100 Ω"},{"id":"rpd","name":"Gate pulldown","type":"resistor","note":"100 kΩ"},{"id":"vmot","name":"Motor supply","type":"supply","note":"12 V"},{"id":"gnd","name":"GND","type":"ground"}],"wires":[{"from":"u1.GPIO18","to":"rg.1"},{"from":"rg.2","to":"q1.G"},{"from":"q1.G","to":"rpd.1"},{"from":"rpd.2","to":"gnd"},{"from":"q1.S","to":"gnd"},{"from":"vmot","to":"m1.1"},{"from":"m1.2","to":"q1.D"},{"from":"d1.K","to":"m1.1"},{"from":"d1.A","to":"q1.D"},{"from":"u1.GND","to":"gnd"}]}
+            """;
+
+        var sketch = SketchReplyParser.Parse(wired, "smart fan controller");
+        var catalog = new SketchRuleCatalog(SketchRules.All);
+        var rules = CircuitComposition.Compose(catalog.Match(sketch, null), sketch, null)!.Rules;
+        foreach (var name in new[] { "Sensor powered", "ADC input connected", "Controller powered", "Gate resistor present", "MOSFET present", "Common ground", "Load powered", "Load off the GPIO", "Flyback diode" })
+        {
+            Assert.Equal("Pass", rules.Single(rule => rule.Name == name).Result);
+        }
+
+        var crossed = CircuitComposition.Compose(catalog.Match(SketchReplyParser.Parse(onGpio, "smart fan controller"), null), SketchReplyParser.Parse(onGpio, "smart fan controller"), null)!.Rules;
+        Assert.Equal("Fail", crossed.Single(rule => rule.Name == "Load off the GPIO").Result);
+
+        var layout = SchematicRouter.Place(sketch);
+        var part = layout.Parts.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(part["fan1"].X, part["q1"].X);
+        Assert.Equal(part["q1"].X, part["gnd"].X);
+        Assert.True(part["fan1"].Y < part["q1"].Y && part["q1"].Y < part["gnd"].Y);
+        Assert.Equal(part["q1"].Y, part["u1"].Y);
+        Assert.Equal(part["q1"].Y, part["r1"].Y);
+        Assert.Equal(part["q1"].Y, part["temp1"].Y);
+        Assert.True(part["temp1"].X < part["u1"].X && part["u1"].X < part["r1"].X && part["r1"].X < part["q1"].X);
+        Assert.Equal("left", part["u1"].Pins.Single(pin => pin.Name.Equals("ADC", StringComparison.OrdinalIgnoreCase)).Side);
+        Assert.Equal("right", part["u1"].Pins.Single(pin => pin.Name.Equals("GPIO17", StringComparison.OrdinalIgnoreCase)).Side);
+
+        var motorSketch = SketchReplyParser.Parse(motorOnly, "motor driver");
+        Assert.Equal(CircuitCategory.MotorDriver, catalog.Match(motorSketch, null)!.Category);
+        var motorRules = CircuitComposition.Compose(catalog.Match(motorSketch, null), motorSketch, null)!.Rules;
+        Assert.Equal("Pass", motorRules.Single(rule => rule.Name == "Flyback diode").Result);
+        Assert.DoesNotContain(motorRules, rule => rule.Name == "ADC input connected");
     }
 
     [Fact]

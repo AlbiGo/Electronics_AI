@@ -10,6 +10,8 @@ public static class MotorFamily
 
     private static readonly PartQuery SolenoidPart = new(["solenoid"], PartText.TypeName);
 
+    private static readonly PartQuery Temperature = new(["temperature", "thermistor", "ntc", "lm35", "tmp36"], PartText.TypeName);
+
     private static readonly PartQuery DiodePart = new(["diode"]);
 
     private static readonly PartQuery Controller = new(["mcu", "esp32", "ecu"], PartText.TypeName);
@@ -54,7 +56,7 @@ public static class MotorFamily
     {
         Category = CircuitCategory.MotorDriver,
         Reason = "Motor driver checked without ngspice.",
-        When = static board => !RelayFamily.Pattern.When(board) && !Bridge.When(board) && !board.Has(SolenoidPart)
+        When = static board => !RelayFamily.Pattern.When(board) && !Bridge.When(board) && !board.Has(SolenoidPart) && !board.Has(Temperature)
             && (board.Has(MotorPart) || (board.Has(MosfetApply) && board.Has(DiodePart) && board.Has(Controller))),
         Checks =
         [

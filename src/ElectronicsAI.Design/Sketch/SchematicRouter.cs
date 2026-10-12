@@ -356,9 +356,27 @@ public static class SchematicRouter
             var top = pins.Where(pin => IsSupplyName(pin)).ToList();
             var bottom = pins.Where(pin => IsGroundName(pin)).ToList();
             var side = pins.Except(top, StringComparer.OrdinalIgnoreCase).Except(bottom, StringComparer.OrdinalIgnoreCase).ToList();
-            PlaceRow(box, top, "top", anchors);
-            PlaceRow(box, lowSide ? side : bottom, "bottom", anchors);
-            PlaceRow(box, lowSide ? bottom : side, lowSide ? "left" : "right", anchors);
+            var analog = side.Where(IsAdcName).ToList();
+            var signals = side.Except(analog, StringComparer.OrdinalIgnoreCase).ToList();
+            var sensorAbove = boxes.Any(other => CircuitRoles.IsSensor(other.Part) && Math.Abs(other.Cx - box.Cx) < 24 && other.Cy < box.Cy);
+            PlaceRow(box, bottom, "bottom", anchors);
+            if (lowSide && sketch.Parts.Any(CircuitRoles.IsSensor) && analog.Count > 0)
+            {
+                PlaceRow(box, top, "top", anchors);
+                PlaceRow(box, analog, "left", anchors);
+                PlaceRow(box, signals, "right", anchors);
+            }
+            else if (sensorAbove && analog.Count > 0)
+            {
+                PlaceRow(box, analog, "top", anchors);
+                PlaceRow(box, top, "right", anchors);
+                PlaceRow(box, signals, "left", anchors);
+            }
+            else
+            {
+                PlaceRow(box, top, "top", anchors);
+                PlaceRow(box, side, "right", anchors);
+            }
         }
 
         if (lowSide)
@@ -372,6 +390,22 @@ public static class SchematicRouter
             {
                 PlaceGateResistor(box, wires, boxes, anchors);
             }
+
+            foreach (var box in boxes.Where(box => CircuitRoles.IsSensor(box.Part)))
+            {
+                PlaceSensor(box, wires, anchors);
+            }
+        }
+
+        foreach (var box in boxes.Where(box => CircuitRoles.IsSensor(box.Part)))
+        {
+            var host = boxes.FirstOrDefault(other => IsEcu(other.Part) || SketchBoard.IsController(other.Part));
+            if (host is null || Math.Abs(box.Cx - host.Cx) > 24 || box.Cy >= host.Cy)
+            {
+                continue;
+            }
+
+            PlaceSensorColumn(box, wires, anchors);
         }
 
         foreach (var wire in wires.OrderBy(wire => RoleRank(RoleOf(wire, parts))))
@@ -531,11 +565,13 @@ public static class SchematicRouter
 
             var kind = SketchPartKinds.Of(part);
             var block = SketchBoard.IsController(part);
+            var sensor = CircuitRoles.IsSensor(part);
             var ecu = IsEcu(part);
+            var chip = ecu && SensorOverController(sketch);
             var rail = kind is SketchPartKind.Supply or SketchPartKind.Ground or SketchPartKind.Node;
             var transistor = IsTransistor(part) && LowSideColumn(sketch) is not null;
-            var span = transistor ? 64 : rail ? 32 : ecu ? 140 : block ? 112 : 56;
-            var across = transistor ? 48 : rail ? 24 : ecu ? 180 : block ? 56 : 28;
+            var span = transistor ? 64 : rail ? 32 : chip ? 48 : ecu ? 140 : block ? 112 : sensor ? 48 : 56;
+            var across = transistor ? 48 : rail ? 24 : chip ? 36 : ecu ? 180 : block ? 56 : sensor ? 36 : 28;
             var width = place.Upright ? across : span;
             var height = place.Upright ? span : across;
             var cx = 96 + place.Column * 168;
@@ -587,7 +623,7 @@ public static class SchematicRouter
     private static Dictionary<string, (double Column, double Row, bool Upright)>? LowSideColumn(SchematicSketch sketch)
     {
         var transistors = sketch.Parts.Where(IsTransistor).ToList();
-        if (transistors.Count != 1 || !sketch.Parts.Any(part => SketchPartKinds.Of(part) == SketchPartKind.Led))
+        if (transistors.Count != 1 || !sketch.Parts.Any(IsSwitchedLoad))
         {
             return null;
         }
@@ -601,15 +637,19 @@ public static class SchematicRouter
             {
                 var text = TextOf(part);
                 return text.Contains("solenoid", StringComparison.OrdinalIgnoreCase)
-                    || text.Contains("motor", StringComparison.OrdinalIgnoreCase)
-                    || text.Contains("pump", StringComparison.OrdinalIgnoreCase)
-                    || text.Contains("relay", StringComparison.OrdinalIgnoreCase);
+                    || text.Contains("relay", StringComparison.OrdinalIgnoreCase)
+                    || text.Contains("h-bridge", StringComparison.OrdinalIgnoreCase)
+                    || text.Contains("hbridge", StringComparison.OrdinalIgnoreCase)
+                    || text.Contains("tb6612", StringComparison.OrdinalIgnoreCase)
+                    || text.Contains("drv8833", StringComparison.OrdinalIgnoreCase)
+                    || text.Contains("l298", StringComparison.OrdinalIgnoreCase)
+                    || text.Contains("l293", StringComparison.OrdinalIgnoreCase);
             }))
         {
             return null;
         }
 
-        var aside = sketch.Parts.Where(part => IsGateResistor(part, sketch) || SketchBoard.IsController(part)).ToList();
+        var aside = sketch.Parts.Where(part => IsGateResistor(part, sketch) || SketchBoard.IsController(part) || CircuitRoles.IsSensor(part)).ToList();
         var spine = sketch.Parts
             .Where(part => aside.All(item => !item.Id.Equals(part.Id, StringComparison.OrdinalIgnoreCase)))
             .OrderBy(LowSideWeight)
@@ -617,21 +657,26 @@ public static class SchematicRouter
         var places = new Dictionary<string, (double Column, double Row, bool Upright)>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < spine.Count; index++)
         {
-            places[spine[index].Id] = (0, index, IsLead(spine[index]));
+            places[spine[index].Id] = (0, index, IsLead(spine[index]) || IsActuator(spine[index]));
         }
 
         var row = places[transistors[0].Id].Row;
-        const double side = -1.45;
         var controllers = aside.Where(SketchBoard.IsController).ToList();
         for (var index = 0; index < controllers.Count; index++)
         {
-            places[controllers[index].Id] = (side, index, false);
+            places[controllers[index].Id] = (-1.35, row, false);
         }
 
         var gate = aside.Where(part => IsGateResistor(part, sketch)).ToList();
         for (var index = 0; index < gate.Count; index++)
         {
-            places[gate[index].Id] = (side, row + index * 0.7, true);
+            places[gate[index].Id] = (-0.62, row + index * 0.55, true);
+        }
+
+        var sensors = aside.Where(CircuitRoles.IsSensor).ToList();
+        for (var index = 0; index < sensors.Count; index++)
+        {
+            places[sensors[index].Id] = (-2.3, row + index * 0.85, false);
         }
 
         return places;
@@ -644,17 +689,12 @@ public static class SchematicRouter
             return 1;
         }
 
-        if (SketchBoard.IsController(part))
-        {
-            return 2;
-        }
-
         if (SketchPartKinds.Of(part) is SketchPartKind.Resistor or SketchPartKind.Capacitor)
         {
             return 3;
         }
 
-        if (SketchPartKinds.Of(part) == SketchPartKind.Led)
+        if (SketchPartKinds.Of(part) == SketchPartKind.Led || IsActuator(part))
         {
             return 4;
         }
@@ -670,6 +710,51 @@ public static class SchematicRouter
         }
 
         return 7;
+    }
+
+    private static bool IsSwitchedLoad(SketchPart part) =>
+        SketchPartKinds.Of(part) == SketchPartKind.Led || IsActuator(part);
+
+    private static bool IsActuator(SketchPart part)
+    {
+        var text = TextOf(part);
+        return text.Contains("fan", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("motor", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("pump", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsAdcName(string pin) =>
+        pin.Contains("ADC", StringComparison.OrdinalIgnoreCase)
+        || System.Text.RegularExpressions.Regex.IsMatch(pin, @"^(A\d+|AN\d*|TempIn|TEMP_IN|TSENS|ANALOG)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    private static void PlaceSensor(Box box, List<SketchWire> wires, Dictionary<string, Anchor> anchors)
+    {
+        var pins = wires.SelectMany(wire => new[] { wire.From, wire.To })
+            .Where(end => OwnerOf(end).Equals(box.Part.Id, StringComparison.OrdinalIgnoreCase) && end.Contains('.'))
+            .Select(end => end[(end.IndexOf('.') + 1)..])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var top = pins.Where(pin => IsSupplyName(pin)).ToList();
+        var bottom = pins.Where(pin => IsGroundName(pin)).ToList();
+        var side = pins.Except(top, StringComparer.OrdinalIgnoreCase).Except(bottom, StringComparer.OrdinalIgnoreCase).ToList();
+        PlaceRow(box, top, "top", anchors);
+        PlaceRow(box, bottom, "bottom", anchors);
+        PlaceRow(box, side, "right", anchors);
+    }
+
+    private static void PlaceSensorColumn(Box box, List<SketchWire> wires, Dictionary<string, Anchor> anchors)
+    {
+        var pins = wires.SelectMany(wire => new[] { wire.From, wire.To })
+            .Where(end => OwnerOf(end).Equals(box.Part.Id, StringComparison.OrdinalIgnoreCase) && end.Contains('.'))
+            .Select(end => end[(end.IndexOf('.') + 1)..])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var top = pins.Where(pin => IsSupplyName(pin)).ToList();
+        var ground = pins.Where(pin => IsGroundName(pin)).ToList();
+        var signal = pins.Except(top, StringComparer.OrdinalIgnoreCase).Except(ground, StringComparer.OrdinalIgnoreCase).ToList();
+        PlaceRow(box, top, "top", anchors);
+        PlaceRow(box, signal, "bottom", anchors);
+        PlaceRow(box, ground, "right", anchors);
     }
 
     private static bool IsTransistor(SketchPart part)
@@ -760,9 +845,9 @@ public static class SchematicRouter
 
             var other = end.Equals(wire.From, StringComparison.OrdinalIgnoreCase) ? wire.To : wire.From;
             var otherBox = boxes.Find(item => item.Part.Id.Equals(OwnerOf(other), StringComparison.OrdinalIgnoreCase));
-            var side = otherBox is not null && IsTransistor(otherBox.Part)
-                ? otherBox.Cx >= box.Cx ? "right" : "left"
-                : "top";
+            var side = otherBox is null
+                ? "top"
+                : otherBox.Cx >= box.Cx ? "right" : "left";
             var point = side switch
             {
                 "top" => Snap(box.Cx, box.Top),
@@ -894,6 +979,20 @@ public static class SchematicRouter
         var rest = sketch.Parts.Where(part => !part.Id.Equals(ecu.Id, StringComparison.OrdinalIgnoreCase) && !IsRailPart(part)).ToList();
         var stacked = rest.Where(part => !IsClampDiode(part)).Select((part, index) => (part, index)).OrderBy(item => StackRank(item.part)).ThenBy(item => item.index).Select(item => item.part).ToList();
         var diodes = rest.Where(IsClampDiode).ToList();
+        if (stacked.Count > 0 && stacked.All(CircuitRoles.IsSensor))
+        {
+            var sensorSheet = new Dictionary<string, (double Column, double Row, bool Upright)>(StringComparer.OrdinalIgnoreCase)
+            {
+                [ecu.Id] = (0, 0, false),
+            };
+            for (var index = 0; index < stacked.Count; index++)
+            {
+                sensorSheet[stacked[index].Id] = (0, -1.7 - index * 0.95, false);
+            }
+
+            return sensorSheet;
+        }
+
         var places = new Dictionary<string, (double Column, double Row, bool Upright)>(StringComparer.OrdinalIgnoreCase)
         {
             [ecu.Id] = (0, Math.Max(0, stacked.Count - 1) / 2.0, false),
@@ -932,6 +1031,18 @@ public static class SchematicRouter
         }
 
         return 2;
+    }
+
+    private static bool SensorOverController(SchematicSketch sketch)
+    {
+        var ecu = sketch.Parts.FirstOrDefault(IsEcu);
+        if (ecu is null)
+        {
+            return false;
+        }
+
+        var rest = sketch.Parts.Where(part => !part.Id.Equals(ecu.Id, StringComparison.OrdinalIgnoreCase) && !IsRailPart(part)).ToList();
+        return rest.Count > 0 && rest.All(CircuitRoles.IsSensor);
     }
 
     private static bool IsEcu(SketchPart part) =>
