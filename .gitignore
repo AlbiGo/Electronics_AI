@@ -10,3 +10,5 @@ secrets.json
 appsettings.*.local.json
 .env
 .env.*
+web/node_modules/
+web/dist/

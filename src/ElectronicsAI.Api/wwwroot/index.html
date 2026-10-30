@@ -138,7 +138,9 @@
       position: relative;
       flex: 1;
       min-height: 0;
-      overflow: auto;
+      overflow: hidden;
+      cursor: grab;
+      touch-action: none;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -146,46 +148,14 @@
       border: 1px solid #2c4038;
       border-radius: 12px;
       background-color: #141816;
-      background-image:
-        linear-gradient(#0c100e, #0c100e),
-        radial-gradient(circle, #070908 1.45px, #3a4440 2.05px, transparent 2.55px);
-      background-size: 100% 22px, 14px 14px;
-      background-position: center, 8px 42px;
-      background-repeat: no-repeat, repeat;
+      background-image: radial-gradient(circle, #3a4440 1.15px, transparent 1.7px);
+      background-size: 14px 14px;
+      background-position: 8px 8px;
       box-shadow: inset 0 0 0 10px #1c2420;
     }
 
-    #stage::before,
-    #stage::after {
-      content: "";
-      position: absolute;
-      left: 18px;
-      right: 18px;
-      height: 22px;
-      pointer-events: none;
-      z-index: 0;
-    }
-
-    #stage::before {
-      top: 14px;
-      background-image:
-        linear-gradient(#e06a5c, #e06a5c),
-        radial-gradient(circle, #070908 1.45px, #3a4440 2.05px, transparent 2.55px);
-      background-size: 100% 3px, 14px 22px;
-      background-position: 0 3px, 0 8px;
-      background-repeat: no-repeat, repeat-x;
-    }
-
-    #stage::after {
-      bottom: 14px;
-      background-image:
-        linear-gradient(#5b8def, #5b8def),
-        radial-gradient(circle, #070908 1.45px, #3a4440 2.05px, transparent 2.55px);
-      background-size: 100% 3px, 14px 22px;
-      background-position: 0 16px, 0 0;
-      background-repeat: no-repeat, repeat-x;
-    }
-
+    #stage.panning { cursor: grabbing; }
+    #stage.panning * { cursor: grabbing; }
     #schematic,
     #stage .spinner { position: relative; z-index: 1; }
 
@@ -251,9 +221,15 @@
 
     #schematic {
       position: relative;
-      width: fit-content;
-      max-width: none;
-      padding: 28px;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      padding: 16px;
     }
 
     .symbol { cursor: help; }
@@ -261,8 +237,9 @@
 
 
     #schematic svg {
+      max-width: 100%;
+      max-height: 100%;
       width: auto;
-      max-width: none;
       height: auto;
       display: block;
       shape-rendering: geometricPrecision;
@@ -493,6 +470,7 @@
     let pendingSuggestion = null;
     let lastDescription = "";
     let viewScale = 1;
+    let viewPan = { x: 0, y: 0 };
     let viewMode = "schematic";
     let sheet = null;
     const history = [];
@@ -827,24 +805,44 @@
     function applyZoom() {
       const svg = document.querySelector("#schematic svg");
       if (!svg) return;
-      const baseW = Number(svg.getAttribute("width")) || svg.viewBox.baseVal.width;
-      const baseH = Number(svg.getAttribute("height")) || svg.viewBox.baseVal.height;
-      svg.style.width = `${baseW * viewScale}px`;
-      svg.style.height = `${baseH * viewScale}px`;
+      svg.style.maxWidth = "100%";
+      svg.style.maxHeight = "100%";
+      svg.style.width = "auto";
+      svg.style.height = "auto";
+      svg.style.transformOrigin = "center center";
+      svg.style.transform = `translate(${viewPan.x}px, ${viewPan.y}px) scale(${viewScale})`;
     }
 
     function fitSchematic() {
-      const stage = document.getElementById("stage");
-      const svg = document.querySelector("#schematic svg");
-      if (!svg || !stage) return;
-      const baseW = Number(svg.getAttribute("width")) || svg.viewBox.baseVal.width;
-      const baseH = Number(svg.getAttribute("height")) || svg.viewBox.baseVal.height;
-      const fit = Math.min((stage.clientWidth - 48) / baseW, (stage.clientHeight - 48) / baseH);
-      viewScale = Math.max(0.2, Math.min(fit || 1, 6));
+      viewPan = { x: 0, y: 0 };
+      viewScale = 1;
       applyZoom();
     }
 
     window.addEventListener("resize", () => fitSchematic());
+
+    const stage = document.getElementById("stage");
+    let canvasDrag = null;
+    stage.addEventListener("pointerdown", event => {
+      if (event.button !== 0) return;
+      canvasDrag = { x: event.clientX, y: event.clientY, panX: viewPan.x, panY: viewPan.y };
+      stage.classList.add("panning");
+      stage.setPointerCapture(event.pointerId);
+    });
+    stage.addEventListener("pointermove", event => {
+      if (!canvasDrag) return;
+      viewPan.x = canvasDrag.panX + event.clientX - canvasDrag.x;
+      viewPan.y = canvasDrag.panY + event.clientY - canvasDrag.y;
+      applyZoom();
+    });
+    const endCanvasDrag = event => {
+      if (!canvasDrag) return;
+      canvasDrag = null;
+      stage.classList.remove("panning");
+      if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
+    };
+    stage.addEventListener("pointerup", endCanvasDrag);
+    stage.addEventListener("pointercancel", endCanvasDrag);
 
     function schematicMarkup() {
       const svg = document.querySelector("#schematic svg");
@@ -916,6 +914,10 @@
       const marks = [];
       const wires = [];
       const ink = [];
+      const symbols = [];
+      const captions = [];
+      const groups = drawGroups(layout, byId, sketch, ink, symbols);
+      const segments = [];
       layout.parts.forEach(place => {
         const part = byId[String(place.id).toLowerCase()] || { id: place.id, name: place.id };
         const icon = deviceIcon(part, place.x, place.y);
@@ -929,39 +931,44 @@
           ? `<rect x="${place.x - frameW / 2}" y="${place.y - frameH / 2}" width="${frameW}" height="${frameH}" rx="4" fill="none" stroke="${roleTone(role)}" stroke-width="1.5" />`
           : "";
         marks.push(`<g class="symbol"><title>${esc(hoverText(part))}</title>${frame}${drawn}</g>`);
+        symbols.push({ x: place.x - frameW / 2 - 6, y: place.y - frameH / 2 - 6, w: frameW + 12, h: frameH + 12 });
         (place.pins || []).forEach(pin => {
-          const dx = pin.x - place.x;
-          const dy = pin.y - place.y;
-          const length = Math.hypot(dx, dy) || 1;
-          if (length > 28) {
-            marks.push(`<line x1="${place.x + dx / length * 16}" y1="${place.y + dy / length * 16}" x2="${pin.x}" y2="${pin.y}" stroke="var(--silk)" stroke-width="1.25" />`);
-          }
+          const lead = pinLead(place, pin);
+          if (lead) marks.push(`<path d="${lead}" fill="none" stroke="var(--silk)" stroke-width="1.25" />`);
           marks.push(`<g><title>${esc(pin.name)}</title><circle cx="${pin.x}" cy="${pin.y}" r="3" fill="var(--text)" /></g>`);
           ink.push({ x: pin.x, y: pin.y });
         });
-        marks.push(caption(place.x, place.y - Math.min(place.height, 40) / 2 - 16, name, "text", "middle"));
-        if (value && !isBlock(part)) marks.push(caption(place.x, place.y + place.height / 2 + 18, value, "silk", "middle"));
-        ink.push({ x: place.x - place.width / 2, y: place.y - place.height / 2 - 20 }, { x: place.x + place.width / 2 + 36, y: place.y + place.height / 2 + 28 });
+        captions.push({ name, value: value && !isBlock(part) ? value : "", place, frameW, frameH });
+        ink.push({ x: place.x - place.width / 2 - 8, y: place.y - place.height / 2 - 28 }, { x: place.x + place.width / 2 + 48, y: place.y + place.height / 2 + 36 });
       });
       const drawn = [];
       const schematic = viewMode === "schematic";
       (layout.wires || []).forEach(wire => {
-        const points = wire.points || [];
+        const points = orthogonalPoints(wire.points || []);
         if (points.length < 2) return;
         if (schematic && wire.role === "ground") {
-          drawGroundEnds(points, wires, ink);
-          return;
+          const ends = [points[0], points[points.length - 1]].filter(point => onPin(point, layout));
+          if (ends.length) {
+            drawGroundEnds(ends.length === 1 ? [ends[0], ends[0]] : points, wires, ink, segments, layout);
+            return;
+          }
         }
         if (schematic && wire.role === "power") {
-          drawPowerFlags(wire, points, wires, ink);
-          return;
+          const ends = [points[0], points[points.length - 1]].filter(point => onPin(point, layout));
+          if (ends.length) {
+            drawPowerFlags(wire, ends, wires, ink, segments, symbols);
+            return;
+          }
         }
         if (schematic && labelSignal(wire, points, byId)) {
-          drawNetEnds(wire, points, wires, ink, signalNetName(wire));
+          drawNetEnds(wire, points, wires, ink, signalNetName(wire), segments);
           return;
         }
         const path = points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x},${point.y}`).join(" ");
         wires.push(trace(path, wire.role || "signal"));
+        for (let index = 1; index < points.length; index += 1) {
+          segments.push({ x1: points[index - 1].x, y1: points[index - 1].y, x2: points[index].x, y2: points[index].y });
+        }
         points.forEach(point => ink.push(point));
         drawn.push(wire);
       });
@@ -984,11 +991,135 @@
           wires.push(ground(bottom.x, bottom.y));
         }
       }
+      captions.forEach(item => {
+        const spot = clearCaption(item, symbols, segments);
+        marks.push(caption(spot.x, spot.y, item.name, "text", spot.anchor));
+        ink.push({ x: spot.box.x, y: spot.box.y }, { x: spot.box.x + spot.box.w, y: spot.box.y + spot.box.h });
+        if (item.value) {
+          const valueY = spot.anchor === "middle" && spot.y > item.place.y ? spot.y + 14 : item.place.y + item.frameH / 2 + 18;
+          marks.push(caption(item.place.x, valueY, item.value, "silk", "middle"));
+        }
+        symbols.push(spot.box);
+      });
       const right = Math.max(...ink.map(point => point.x), 160);
       const bottomEdge = Math.max(...ink.map(point => point.y), 140) + 36;
       const left = Math.min(0, ...ink.map(point => point.x)) - 36;
       const topEdge = Math.min(0, ...ink.map(point => point.y)) - 36;
-      return `<svg width="${Math.max(right - left + 24, 1)}" height="${Math.max(bottomEdge - topEdge, 1)}" viewBox="${left} ${topEdge} ${right - left + 24} ${bottomEdge - topEdge}" xmlns="http://www.w3.org/2000/svg">${wires.join("")}${marks.join("")}</svg>`;
+      return `<svg width="${Math.max(right - left + 24, 1)}" height="${Math.max(bottomEdge - topEdge, 1)}" viewBox="${left} ${topEdge} ${right - left + 24} ${bottomEdge - topEdge}" xmlns="http://www.w3.org/2000/svg">${groups}${wires.join("")}${marks.join("")}</svg>`;
+    }
+
+    function orthogonalPoints(points) {
+      if (!points.length) return [];
+      const out = [{ x: points[0].x, y: points[0].y }];
+      points.slice(1).forEach(next => {
+        const prev = out[out.length - 1];
+        if (prev.x !== next.x && prev.y !== next.y) out.push({ x: prev.x, y: next.y });
+        if (out[out.length - 1].x !== next.x || out[out.length - 1].y !== next.y) out.push({ x: next.x, y: next.y });
+      });
+      return out;
+    }
+
+    function pinLead(place, pin) {
+      if (Math.hypot(pin.x - place.x, pin.y - place.y) <= 28) return "";
+      const side = pin.side || "";
+      if (side === "left" || side === "right") {
+        const x = side === "left" ? place.x - 14 : place.x + 14;
+        if (Math.abs(pin.y - place.y) < 2) return `M${x},${place.y} L${pin.x},${pin.y}`;
+        return `M${x},${place.y} L${pin.x},${place.y} L${pin.x},${pin.y}`;
+      }
+      if (side === "top" || side === "bottom") {
+        const y = side === "top" ? place.y - 14 : place.y + 14;
+        if (Math.abs(pin.x - place.x) < 2) return `M${place.x},${y} L${pin.x},${pin.y}`;
+        return `M${place.x},${y} L${place.x},${pin.y} L${pin.x},${pin.y}`;
+      }
+      return "";
+    }
+
+    function textBox(x, y, text, anchor) {
+      const width = Math.max(18, String(text).length * 6.6);
+      const left = anchor === "middle" ? x - width / 2 : anchor === "end" ? x - width : x;
+      return { x: left - 4, y: y - 13, w: width + 8, h: 16 };
+    }
+
+    function rectsOverlap(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function rectHitsSegment(box, seg, pad) {
+      const left = box.x - pad;
+      const right = box.x + box.w + pad;
+      const top = box.y - pad;
+      const bottom = box.y + box.h + pad;
+      const x1 = seg.x1;
+      const y1 = seg.y1;
+      const x2 = seg.x2;
+      const y2 = seg.y2;
+      if (x1 === x2) return x1 >= left && x1 <= right && Math.max(y1, y2) >= top && Math.min(y1, y2) <= bottom;
+      if (y1 === y2) return y1 >= top && y1 <= bottom && Math.max(x1, x2) >= left && Math.min(x1, x2) <= right;
+      return true;
+    }
+
+    function clearCaption(item, symbols, segments) {
+      const place = item.place;
+      const candidates = [
+        { x: place.x, y: place.y - item.frameH / 2 - 22, anchor: "middle" },
+        { x: place.x + item.frameW / 2 + 12, y: place.y + 4, anchor: "start" },
+        { x: place.x - item.frameW / 2 - 12, y: place.y + 4, anchor: "end" },
+        { x: place.x, y: place.y + item.frameH / 2 + 24, anchor: "middle" },
+        { x: place.x + item.frameW / 2 + 12, y: place.y - item.frameH / 2 - 6, anchor: "start" },
+      ];
+      const placed = candidates.map(spot => {
+        const box = textBox(spot.x, spot.y, item.name, spot.anchor);
+        const hit = segments.some(seg => rectHitsSegment(box, seg, 8)) || symbols.some(sym => rectsOverlap(box, sym));
+        return { ...spot, box, hit };
+      });
+      return placed.find(spot => !spot.hit) || placed[2];
+    }
+
+    function drawGroups(layout, byId, sketch, ink, symbols) {
+      const touchesFet = id => (sketch.wires || []).some(wire => {
+        const ends = [wire.from, wire.to].map(end => String(end || "").split(".")[0].toLowerCase());
+        if (!ends.includes(String(id).toLowerCase())) return false;
+        return ends.some(end => {
+          const other = byId[end];
+          return other && /mosfet|nmos|transistor|\bbjt\b/i.test(`${other.type || ""} ${other.name || ""}`);
+        });
+      });
+      const boxes = new Map();
+      (layout.parts || []).forEach(place => {
+        const part = byId[String(place.id).toLowerCase()] || { id: place.id };
+        const text = `${part.type || ""} ${part.name || ""} ${part.note || ""}`.toLowerCase();
+        let role = partRole(part);
+        if (!role && /resistor|\bohm\b/.test(text) && (/gate/.test(text) || touchesFet(part.id))) role = "Driver";
+        if (!role || role === "Power") return;
+        const box = boxes.get(role) || { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity };
+        const halfW = Math.min(place.width, 72) / 2;
+        const halfH = Math.min(place.height, 48) / 2;
+        box.left = Math.min(box.left, place.x - halfW);
+        box.right = Math.max(box.right, place.x + halfW);
+        box.top = Math.min(box.top, place.y - halfH);
+        box.bottom = Math.max(box.bottom, place.y + halfH);
+        boxes.set(role, box);
+      });
+      if (boxes.has("Protection") && boxes.has("Load")) {
+        const diode = boxes.get("Protection");
+        const load = boxes.get("Load");
+        load.left = Math.min(load.left, diode.left);
+        load.right = Math.max(load.right, diode.right);
+        load.top = Math.min(load.top, diode.top);
+        load.bottom = Math.max(load.bottom, diode.bottom);
+        boxes.delete("Protection");
+      }
+      return [...boxes.entries()].map(([role, box]) => {
+        const x = box.left - 30;
+        const y = box.top - 38;
+        const width = box.right - box.left + 60;
+        const height = box.bottom - box.top + 68;
+        const tone = roleTone(role);
+        if (ink) ink.push({ x, y }, { x: x + width, y: y + height });
+        if (symbols) symbols.push({ x: x + 8, y: y + 2, w: role.length * 7 + 12, h: 16 });
+        return `<g class="region"><rect x="${x}" y="${y}" width="${width}" height="${height}" rx="10" fill="${tone}" fill-opacity="0.05" stroke="${tone}" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="5 4" /><text x="${x + 10}" y="${y + 16}" fill="${tone}" fill-opacity="0.75" font-size="11">${role}</text></g>`;
+      }).join("");
     }
 
     function drawLogic(sketch) {
@@ -1452,16 +1583,22 @@
       return (named || "NET").replace(/[^A-Za-z0-9]+/g, "_").toUpperCase();
     }
 
-    function drawPowerFlags(wire, points, wires, ink) {
+    function onPin(point, layout) {
+      return (layout.parts || []).some(part => (part.pins || []).some(pin => Math.abs(pin.x - point.x) < 8 && Math.abs(pin.y - point.y) < 8));
+    }
+
+    function drawPowerFlags(wire, points, wires, ink, segments, blocks) {
       const name = netName(wire);
       const ends = [];
       [points[0], points[points.length - 1]].forEach(at => {
         if (!at || ends.some(item => item.x === at.x && item.y === at.y)) return;
         ends.push(at);
-        const tip = { x: at.x, y: at.y - 16 };
+        const tip = { x: at.x, y: at.y - 22 };
         wires.push(trace(`M${at.x},${at.y} L${tip.x},${tip.y}`, "power"));
-        wires.push(caption(tip.x + 6, tip.y + 4, name, "power", "start"));
-        ink.push(at, tip, { x: tip.x + name.length * 7, y: tip.y - 10 });
+        wires.push(caption(tip.x + 8, tip.y + 4, name, "power", "start"));
+        if (segments) segments.push({ x1: at.x, y1: at.y, x2: tip.x, y2: tip.y });
+        if (blocks) blocks.push({ x: tip.x + 4, y: tip.y - 12, w: name.length * 7 + 8, h: 16 });
+        ink.push(at, tip, { x: tip.x + name.length * 7 + 8, y: tip.y - 12 });
       });
     }
 
@@ -1485,18 +1622,19 @@
       return rail.toUpperCase();
     }
 
-    function drawGroundEnds(points, wires, ink) {
+    function drawGroundEnds(points, wires, ink, segments) {
       const ends = [];
       [points[0], points[points.length - 1]].forEach(at => {
         if (ends.some(item => item.x === at.x && item.y === at.y)) return;
         ends.push(at);
         wires.push(trace(`M${at.x},${at.y} L${at.x},${at.y + 8}`, "ground"));
         wires.push(ground(at.x, at.y + 8));
+        if (segments) segments.push({ x1: at.x, y1: at.y, x2: at.x, y2: at.y + 20 });
         ink.push(at, { x: at.x - 16, y: at.y + 24 }, { x: at.x + 16, y: at.y + 24 });
       });
     }
 
-    function drawNetEnds(wire, points, wires, ink, name) {
+    function drawNetEnds(wire, points, wires, ink, name, segments) {
       const labelName = name || netName(wire);
       const tone = wire.role === "power" ? "power" : wire.role === "ground" ? "gnd" : wire.role === "analog" ? "analog" : "signal";
       [[points[0], points[1]], [points[points.length - 1], points[points.length - 2]]].forEach(([at, toward]) => {
@@ -1505,6 +1643,7 @@
         const uy = horizontal ? 0 : Math.sign(toward.y - at.y || 1);
         const tip = { x: at.x + ux * 16, y: at.y + uy * 16 };
         wires.push(trace(`M${at.x},${at.y} L${tip.x},${tip.y}`, wire.role || "signal"));
+        if (segments) segments.push({ x1: at.x, y1: at.y, x2: tip.x, y2: tip.y });
         const anchor = ux < 0 ? "end" : ux > 0 ? "start" : "middle";
         const label = { x: tip.x + ux * 6, y: tip.y + (uy < 0 ? -6 : uy > 0 ? 14 : -6) };
         wires.push(caption(label.x, label.y, labelName, tone, anchor));

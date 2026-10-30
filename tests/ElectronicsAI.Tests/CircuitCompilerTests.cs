@@ -728,6 +728,27 @@ public class CircuitCompilerTests
     }
 
     [Fact]
+    public void Colon_pin_wires_are_read_as_part_pins()
+    {
+        const string reply = """
+            {"title":"ECU with temperature sensor, switch, and solenoid","summary":"ECU drives a low-side N-MOSFET.","parts":[{"id":"ecu","name":"ECU","type":"block","category":"Controller","pins":["VCC","GND","TempIn","SwitchIn","SolenoidOut"]},{"id":"sensor","name":"temperature sensor","type":"sensor","category":"Sensor","pins":["VCC","GND","Output"]},{"id":"switch","name":"switch","type":"switch","pins":["1","2"]},{"id":"solenoid","name":"solenoid","type":"solenoid","category":"Actuator","pins":["+V","-V"]},{"id":"mosfet","name":"N-MOSFET","type":"nmos","category":"Driver","pins":["Gate","Drain","Source"]},{"id":"gateR","name":"gate resistor","type":"resistor","note":"100 ohm","pins":["A","B"]},{"id":"pullR","name":"gate pull-down","type":"resistor","note":"100k","pins":["A","B"]},{"id":"diode","name":"flyback diode","type":"diode","category":"Protection","pins":["Anode","Cathode"]}],"wires":[{"from":"sensor:VCC","to":"5V"},{"from":"sensor:GND","to":"GND"},{"from":"ecu:VCC","to":"5V"},{"from":"ecu:GND","to":"GND"},{"from":"sensor:Output","to":"ecu:TempIn"},{"from":"switch:1","to":"5V"},{"from":"switch:2","to":"ecu:SwitchIn"},{"from":"ecu:SolenoidOut","to":"gateR:A"},{"from":"gateR:B","to":"mosfet:Gate"},{"from":"pullR:A","to":"mosfet:Gate"},{"from":"pullR:B","to":"GND"},{"from":"+12V","to":"solenoid:+V"},{"from":"solenoid:-V","to":"mosfet:Drain"},{"from":"mosfet:Source","to":"GND"},{"from":"diode:Cathode","to":"+12V"},{"from":"diode:Anode","to":"solenoid:-V"}]}
+            """;
+
+        var sketch = SketchReplyParser.Parse(reply, "ECU temperature sensor switch solenoid");
+        Assert.Contains(sketch.Wires, wire => wire.From == "sensor.Output" && wire.To == "ecu.TempIn");
+        Assert.Contains(sketch.Wires, wire => wire.From == "solenoid.-V" && wire.To == "mosfet.Drain");
+
+        var catalog = new SketchRuleCatalog(SketchRules.All);
+        var rules = CircuitComposition.Compose(catalog.Match(sketch, null), sketch, null)!.Rules;
+        Assert.All(rules, rule => Assert.True(rule.Result == "Pass", $"{rule.Name}: {rule.Detail}"));
+
+        var layout = SchematicRouter.Place(sketch);
+        Assert.NotEmpty(layout.Wires);
+        Assert.NotEmpty(layout.Parts.Single(part => part.Id == "ecu").Pins);
+        Assert.NotEmpty(layout.Parts.Single(part => part.Id == "mosfet").Pins);
+    }
+
+    [Fact]
     public void A_solenoid_wired_to_an_ecu_pin_fails()
     {
         const string reply = """

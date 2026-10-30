@@ -509,28 +509,13 @@ public static class SketchReplyParser
             return whole.Id;
         }
 
-        var dot = text.IndexOf('.');
-        if (dot < 0)
+        var split = SplitPin(text, parts);
+        if (split is null)
         {
-            return text;
+            return text.Contains('.') || text.Contains(':') ? null : text;
         }
 
-        if (dot == 0 || dot == text.Length - 1)
-        {
-            return null;
-        }
-
-        var part = parts.FirstOrDefault(item => item.Id.Equals(text[..dot], StringComparison.OrdinalIgnoreCase));
-        if (part is null)
-        {
-            return null;
-        }
-
-        var pinText = text[(dot + 1)..];
-        if (pinText.Length == 0)
-        {
-            return null;
-        }
+        var (part, pinText) = split.Value;
 
         if (part.Pins.Count > 0)
         {
@@ -539,6 +524,25 @@ public static class SketchReplyParser
         }
 
         return $"{part.Id}.{pinText}";
+    }
+
+    private static (SketchPart Part, string Pin)? SplitPin(string text, IReadOnlyList<SketchPart> parts)
+    {
+        for (var index = 0; index < text.Length; index++)
+        {
+            if (text[index] is not ('.' or ':') || index == 0 || index == text.Length - 1)
+            {
+                continue;
+            }
+
+            var part = parts.FirstOrDefault(item => item.Id.Equals(text[..index], StringComparison.OrdinalIgnoreCase));
+            if (part is not null)
+            {
+                return (part, text[(index + 1)..]);
+            }
+        }
+
+        return null;
     }
 
     private static string? Text(JsonElement root, string name)

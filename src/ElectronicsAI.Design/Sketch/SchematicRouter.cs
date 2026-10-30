@@ -60,7 +60,8 @@ public static class SchematicRouter
                 rail[net] = path[^1];
             }
 
-            routed.Add(new LayoutWire(wire.From, wire.To, role, path.Select(point => new LayoutPoint(point.X, point.Y)).ToList()));
+            var orthogonal = Orthogonal(path);
+            routed.Add(new LayoutWire(wire.From, wire.To, role, orthogonal.Select(point => new LayoutPoint(point.X, point.Y)).ToList()));
         }
 
         var parts = boxes.Select(box => new LayoutPart(
@@ -299,6 +300,32 @@ public static class SchematicRouter
 
         compact.Add(kept[^1]);
         return compact;
+    }
+
+    private static List<(int X, int Y)> Orthogonal(List<(int X, int Y)> path)
+    {
+        if (path.Count < 2)
+        {
+            return path;
+        }
+
+        var bent = new List<(int X, int Y)> { path[0] };
+        for (var index = 1; index < path.Count; index++)
+        {
+            var previous = bent[^1];
+            var next = path[index];
+            if (previous.X != next.X && previous.Y != next.Y)
+            {
+                bent.Add((previous.X, next.Y));
+            }
+
+            if (bent[^1] != next)
+            {
+                bent.Add(next);
+            }
+        }
+
+        return Compact(bent);
     }
 
     private static List<(int X, int Y)> Walk(Dictionary<(int X, int Y), (int X, int Y)> came, (int X, int Y) node)
